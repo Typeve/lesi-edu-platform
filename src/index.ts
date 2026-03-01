@@ -26,6 +26,15 @@ import { createAuditLogService } from "./modules/audit/service.js";
 import { createAuthorizationGrantService } from "./modules/authorization/grant-service.js";
 import { createDashboardDimensionAggregationService } from "./modules/metrics/aggregation.js";
 import {
+  createCachedDashboardDimensionAggregationService,
+  createCachedDashboardTrendFunnelService,
+  createInMemoryDashboardCacheStore
+} from "./modules/metrics/cache.js";
+import {
+  createDashboardSlowQueryObserver,
+  measureObservedAsync
+} from "./modules/metrics/observability.js";
+import {
   createDashboardTrendFunnelService,
   type DashboardTrendFunnelQueryInput
 } from "./modules/metrics/trend-funnel.js";
@@ -278,6 +287,17 @@ const auditLogService = createAuditLogService({
 });
 
 const excelImportValidationService = createExcelImportValidationService();
+const dashboardSlowQueryObserver = createDashboardSlowQueryObserver({
+  slowQueryThresholdMs: env.METRICS_SLOW_QUERY_THRESHOLD_MS
+});
+
+const observeMetricsQuery = async <T>(queryName: string, run: () => Promise<T>): Promise<T> => {
+  return measureObservedAsync({
+    queryName,
+    observer: dashboardSlowQueryObserver,
+    run
+  });
+};
 
 const dashboardMetricsRepo = {
   async listClassMetricRecords(filters: {
@@ -286,124 +306,138 @@ const dashboardMetricsRepo = {
     majorId?: number;
     classId?: number;
   }) {
-    const conditions = [];
+    return observeMetricsQuery("metrics.listClassMetricRecords", async () => {
+      const conditions = [];
 
-    if (filters.schoolId) {
-      conditions.push(eq(colleges.schoolId, filters.schoolId));
-    }
-    if (filters.collegeId) {
-      conditions.push(eq(classes.collegeId, filters.collegeId));
-    }
-    if (filters.majorId) {
-      conditions.push(eq(classes.majorId, filters.majorId));
-    }
-    if (filters.classId) {
-      conditions.push(eq(classes.id, filters.classId));
-    }
+      if (filters.schoolId) {
+        conditions.push(eq(colleges.schoolId, filters.schoolId));
+      }
+      if (filters.collegeId) {
+        conditions.push(eq(classes.collegeId, filters.collegeId));
+      }
+      if (filters.majorId) {
+        conditions.push(eq(classes.majorId, filters.majorId));
+      }
+      if (filters.classId) {
+        conditions.push(eq(classes.id, filters.classId));
+      }
 
-    const baseQuery = db
-      .select({
-        schoolId: colleges.schoolId,
-        collegeId: colleges.id,
-        collegeName: colleges.name,
-        majorId: majors.id,
-        majorName: majors.name,
-        classId: classes.id,
-        className: classes.name
-      })
-      .from(classes)
-      .innerJoin(colleges, eq(classes.collegeId, colleges.id))
-      .leftJoin(majors, eq(classes.majorId, majors.id));
+      const baseQuery = db
+        .select({
+          schoolId: colleges.schoolId,
+          collegeId: colleges.id,
+          collegeName: colleges.name,
+          majorId: majors.id,
+          majorName: majors.name,
+          classId: classes.id,
+          className: classes.name
+        })
+        .from(classes)
+        .innerJoin(colleges, eq(classes.collegeId, colleges.id))
+        .leftJoin(majors, eq(classes.majorId, majors.id));
 
-    const classRows =
-      conditions.length > 0 ? await baseQuery.where(and(...conditions)) : await baseQuery;
+      const classRows =
+        conditions.length > 0 ? await baseQuery.where(and(...conditions)) : await baseQuery;
 
-    const records: Array<{
-      schoolId: number;
-      collegeId: number;
-      collegeName: string;
-      majorId: number | null;
-      majorName: string | null;
-      classId: number;
-      className: string;
-      activatedStudentsCount: number;
-      assessmentCompletedStudentsCount: number;
-      reportGeneratedStudentsCount: number;
-      studentsWithAssignedTasksCount: number;
-      studentsWithCompletedTaskCount: number;
-      studentsEligibleForActivitiesCount: number;
-      studentsParticipatedActivitiesCount: number;
-      reportDirectionEmploymentCount: number;
-      reportDirectionPostgraduateCount: number;
-      reportDirectionCivilServiceCount: number;
-    }> = [];
+      const records: Array<{
+        schoolId: number;
+        collegeId: number;
+        collegeName: string;
+        majorId: number | null;
+        majorName: string | null;
+        classId: number;
+        className: string;
+        activatedStudentsCount: number;
+        assessmentCompletedStudentsCount: number;
+        reportGeneratedStudentsCount: number;
+        studentsWithAssignedTasksCount: number;
+        studentsWithCompletedTaskCount: number;
+        studentsEligibleForActivitiesCount: number;
+        studentsParticipatedActivitiesCount: number;
+        reportDirectionEmploymentCount: number;
+        reportDirectionPostgraduateCount: number;
+        reportDirectionCivilServiceCount: number;
+      }> = [];
 
-    for (const classRow of classRows) {
-      const studentsInClass = await db
-        .select({ id: students.id })
-        .from(students)
-        .where(eq(students.classId, classRow.classId));
+      for (const classRow of classRows) {
+        const studentsInClass = await db
+          .select({ id: students.id })
+          .from(students)
+          .where(eq(students.classId, classRow.classId));
 
-      const activatedStudentsCount = studentsInClass.length;
+        const activatedStudentsCount = studentsInClass.length;
 
-      const profileRows = await db
-        .select({ studentId: profiles.studentId })
-        .from(profiles)
-        .innerJoin(students, eq(profiles.studentId, students.id))
-        .where(eq(students.classId, classRow.classId));
-      const assessmentCompletedStudentsCount = new Set(profileRows.map((row) => row.studentId)).size;
+        const profileRows = await db
+          .select({ studentId: profiles.studentId })
+          .from(profiles)
+          .innerJoin(students, eq(profiles.studentId, students.id))
+          .where(eq(students.classId, classRow.classId));
+        const assessmentCompletedStudentsCount = new Set(profileRows.map((row) => row.studentId)).size;
 
-      const reportRows = await db
-        .select({ studentId: reports.studentId, direction: reports.direction })
-        .from(reports)
-        .innerJoin(students, eq(reports.studentId, students.id))
-        .where(eq(students.classId, classRow.classId));
-      const reportGeneratedStudentsCount = new Set(reportRows.map((row) => row.studentId)).size;
+        const reportRows = await db
+          .select({ studentId: reports.studentId, direction: reports.direction })
+          .from(reports)
+          .innerJoin(students, eq(reports.studentId, students.id))
+          .where(eq(students.classId, classRow.classId));
+        const reportGeneratedStudentsCount = new Set(reportRows.map((row) => row.studentId)).size;
 
-      const taskRows = await db
-        .select({ studentId: tasks.studentId })
-        .from(tasks)
-        .innerJoin(students, eq(tasks.studentId, students.id))
-        .where(eq(students.classId, classRow.classId));
-      const studentsWithAssignedTasksCount = new Set(taskRows.map((row) => row.studentId)).size;
-      const studentsWithCompletedTaskCount = studentsWithAssignedTasksCount;
+        const taskRows = await db
+          .select({ studentId: tasks.studentId })
+          .from(tasks)
+          .innerJoin(students, eq(tasks.studentId, students.id))
+          .where(eq(students.classId, classRow.classId));
+        const studentsWithAssignedTasksCount = new Set(taskRows.map((row) => row.studentId)).size;
+        const studentsWithCompletedTaskCount = studentsWithAssignedTasksCount;
 
-      const certificateRows = await db
-        .select({ studentId: certificates.studentId })
-        .from(certificates)
-        .innerJoin(students, eq(certificates.studentId, students.id))
-        .where(eq(students.classId, classRow.classId));
-      const studentsParticipatedActivitiesCount = new Set(
-        certificateRows.map((row) => row.studentId)
-      ).size;
+        const certificateRows = await db
+          .select({ studentId: certificates.studentId })
+          .from(certificates)
+          .innerJoin(students, eq(certificates.studentId, students.id))
+          .where(eq(students.classId, classRow.classId));
+        const studentsParticipatedActivitiesCount = new Set(
+          certificateRows.map((row) => row.studentId)
+        ).size;
 
-      records.push({
-        schoolId: classRow.schoolId,
-        collegeId: classRow.collegeId,
-        collegeName: classRow.collegeName,
-        majorId: classRow.majorId,
-        majorName: classRow.majorName,
-        classId: classRow.classId,
-        className: classRow.className,
-        activatedStudentsCount,
-        assessmentCompletedStudentsCount,
-        reportGeneratedStudentsCount,
-        studentsWithAssignedTasksCount,
-        studentsWithCompletedTaskCount,
-        studentsEligibleForActivitiesCount: activatedStudentsCount,
-        studentsParticipatedActivitiesCount,
-        reportDirectionEmploymentCount: reportRows.filter((row) => row.direction === "employment").length,
-        reportDirectionPostgraduateCount: reportRows.filter((row) => row.direction === "postgraduate").length,
-        reportDirectionCivilServiceCount: reportRows.filter((row) => row.direction === "civil_service").length
-      });
-    }
+        records.push({
+          schoolId: classRow.schoolId,
+          collegeId: classRow.collegeId,
+          collegeName: classRow.collegeName,
+          majorId: classRow.majorId,
+          majorName: classRow.majorName,
+          classId: classRow.classId,
+          className: classRow.className,
+          activatedStudentsCount,
+          assessmentCompletedStudentsCount,
+          reportGeneratedStudentsCount,
+          studentsWithAssignedTasksCount,
+          studentsWithCompletedTaskCount,
+          studentsEligibleForActivitiesCount: activatedStudentsCount,
+          studentsParticipatedActivitiesCount,
+          reportDirectionEmploymentCount: reportRows.filter((row) => row.direction === "employment").length,
+          reportDirectionPostgraduateCount: reportRows.filter((row) => row.direction === "postgraduate").length,
+          reportDirectionCivilServiceCount: reportRows.filter((row) => row.direction === "civil_service").length
+        });
+      }
 
-    return records;
+      return records;
+    });
   }
 };
 
-const dashboardDimensionAggregationService = createDashboardDimensionAggregationService({
+const dashboardCacheStore = createInMemoryDashboardCacheStore();
+const dashboardCacheConfig = {
+  ttlMs: env.METRICS_CACHE_TTL_SECONDS * 1000,
+  invalidationStrategy: env.METRICS_CACHE_INVALIDATION_STRATEGY
+} as const;
+
+const rawDashboardDimensionAggregationService = createDashboardDimensionAggregationService({
   dashboardMetricsRepo
+});
+
+const dashboardDimensionAggregationService = createCachedDashboardDimensionAggregationService({
+  dashboardDimensionAggregationService: rawDashboardDimensionAggregationService,
+  cacheStore: dashboardCacheStore,
+  cacheConfig: dashboardCacheConfig
 });
 
 const toDateOnlyString = (value: Date | string): string => {
@@ -444,138 +478,154 @@ const buildTrendFunnelConditions = (
 
 const dashboardTrendFunnelRepo = {
   async listActivatedStudents({ filters, dateRange }: DashboardTrendFunnelQueryInput) {
-    const endExclusiveDate = toUtcDate(dateRange.endDate);
-    endExclusiveDate.setUTCDate(endExclusiveDate.getUTCDate() + 1);
+    return observeMetricsQuery("metrics.listActivatedStudents", async () => {
+      const endExclusiveDate = toUtcDate(dateRange.endDate);
+      endExclusiveDate.setUTCDate(endExclusiveDate.getUTCDate() + 1);
 
-    const rows = await db
-      .select({
-        studentId: students.id,
-        createdAt: students.createdAt
-      })
-      .from(students)
-      .innerJoin(classes, eq(students.classId, classes.id))
-      .innerJoin(colleges, eq(classes.collegeId, colleges.id))
-      .where(
-        and(
-          ...buildTrendFunnelConditions(filters),
-          gte(students.createdAt, toUtcDate(dateRange.startDate)),
-          lt(students.createdAt, endExclusiveDate)
-        )
-      );
+      const rows = await db
+        .select({
+          studentId: students.id,
+          createdAt: students.createdAt
+        })
+        .from(students)
+        .innerJoin(classes, eq(students.classId, classes.id))
+        .innerJoin(colleges, eq(classes.collegeId, colleges.id))
+        .where(
+          and(
+            ...buildTrendFunnelConditions(filters),
+            gte(students.createdAt, toUtcDate(dateRange.startDate)),
+            lt(students.createdAt, endExclusiveDate)
+          )
+        );
 
-    return rows.map((row) => ({
-      studentId: row.studentId,
-      date: toDateOnlyString(row.createdAt)
-    }));
+      return rows.map((row) => ({
+        studentId: row.studentId,
+        date: toDateOnlyString(row.createdAt)
+      }));
+    });
   },
   async listAssessmentCompletedStudents({ filters, dateRange }: DashboardTrendFunnelQueryInput) {
-    const endExclusiveDate = toUtcDate(dateRange.endDate);
-    endExclusiveDate.setUTCDate(endExclusiveDate.getUTCDate() + 1);
+    return observeMetricsQuery("metrics.listAssessmentCompletedStudents", async () => {
+      const endExclusiveDate = toUtcDate(dateRange.endDate);
+      endExclusiveDate.setUTCDate(endExclusiveDate.getUTCDate() + 1);
 
-    const rows = await db
-      .select({
-        studentId: profiles.studentId,
-        createdAt: profiles.createdAt
-      })
-      .from(profiles)
-      .innerJoin(students, eq(profiles.studentId, students.id))
-      .innerJoin(classes, eq(students.classId, classes.id))
-      .innerJoin(colleges, eq(classes.collegeId, colleges.id))
-      .where(
-        and(
-          ...buildTrendFunnelConditions(filters),
-          gte(profiles.createdAt, toUtcDate(dateRange.startDate)),
-          lt(profiles.createdAt, endExclusiveDate)
-        )
-      );
+      const rows = await db
+        .select({
+          studentId: profiles.studentId,
+          createdAt: profiles.createdAt
+        })
+        .from(profiles)
+        .innerJoin(students, eq(profiles.studentId, students.id))
+        .innerJoin(classes, eq(students.classId, classes.id))
+        .innerJoin(colleges, eq(classes.collegeId, colleges.id))
+        .where(
+          and(
+            ...buildTrendFunnelConditions(filters),
+            gte(profiles.createdAt, toUtcDate(dateRange.startDate)),
+            lt(profiles.createdAt, endExclusiveDate)
+          )
+        );
 
-    return rows.map((row) => ({
-      studentId: row.studentId,
-      date: toDateOnlyString(row.createdAt)
-    }));
+      return rows.map((row) => ({
+        studentId: row.studentId,
+        date: toDateOnlyString(row.createdAt)
+      }));
+    });
   },
   async listReportGeneratedStudents({ filters, dateRange }: DashboardTrendFunnelQueryInput) {
-    const endExclusiveDate = toUtcDate(dateRange.endDate);
-    endExclusiveDate.setUTCDate(endExclusiveDate.getUTCDate() + 1);
+    return observeMetricsQuery("metrics.listReportGeneratedStudents", async () => {
+      const endExclusiveDate = toUtcDate(dateRange.endDate);
+      endExclusiveDate.setUTCDate(endExclusiveDate.getUTCDate() + 1);
 
-    const rows = await db
-      .select({
-        studentId: reports.studentId,
-        createdAt: reports.createdAt
-      })
-      .from(reports)
-      .innerJoin(students, eq(reports.studentId, students.id))
-      .innerJoin(classes, eq(students.classId, classes.id))
-      .innerJoin(colleges, eq(classes.collegeId, colleges.id))
-      .where(
-        and(
-          ...buildTrendFunnelConditions(filters),
-          gte(reports.createdAt, toUtcDate(dateRange.startDate)),
-          lt(reports.createdAt, endExclusiveDate)
-        )
-      );
+      const rows = await db
+        .select({
+          studentId: reports.studentId,
+          createdAt: reports.createdAt
+        })
+        .from(reports)
+        .innerJoin(students, eq(reports.studentId, students.id))
+        .innerJoin(classes, eq(students.classId, classes.id))
+        .innerJoin(colleges, eq(classes.collegeId, colleges.id))
+        .where(
+          and(
+            ...buildTrendFunnelConditions(filters),
+            gte(reports.createdAt, toUtcDate(dateRange.startDate)),
+            lt(reports.createdAt, endExclusiveDate)
+          )
+        );
 
-    return rows.map((row) => ({
-      studentId: row.studentId,
-      date: toDateOnlyString(row.createdAt)
-    }));
+      return rows.map((row) => ({
+        studentId: row.studentId,
+        date: toDateOnlyString(row.createdAt)
+      }));
+    });
   },
   async listTaskCompletedStudents({ filters, dateRange }: DashboardTrendFunnelQueryInput) {
-    const endExclusiveDate = toUtcDate(dateRange.endDate);
-    endExclusiveDate.setUTCDate(endExclusiveDate.getUTCDate() + 1);
+    return observeMetricsQuery("metrics.listTaskCompletedStudents", async () => {
+      const endExclusiveDate = toUtcDate(dateRange.endDate);
+      endExclusiveDate.setUTCDate(endExclusiveDate.getUTCDate() + 1);
 
-    const rows = await db
-      .select({
-        studentId: tasks.studentId,
-        createdAt: tasks.createdAt
-      })
-      .from(tasks)
-      .innerJoin(students, eq(tasks.studentId, students.id))
-      .innerJoin(classes, eq(students.classId, classes.id))
-      .innerJoin(colleges, eq(classes.collegeId, colleges.id))
-      .where(
-        and(
-          ...buildTrendFunnelConditions(filters),
-          gte(tasks.createdAt, toUtcDate(dateRange.startDate)),
-          lt(tasks.createdAt, endExclusiveDate)
-        )
-      );
+      const rows = await db
+        .select({
+          studentId: tasks.studentId,
+          createdAt: tasks.createdAt
+        })
+        .from(tasks)
+        .innerJoin(students, eq(tasks.studentId, students.id))
+        .innerJoin(classes, eq(students.classId, classes.id))
+        .innerJoin(colleges, eq(classes.collegeId, colleges.id))
+        .where(
+          and(
+            ...buildTrendFunnelConditions(filters),
+            gte(tasks.createdAt, toUtcDate(dateRange.startDate)),
+            lt(tasks.createdAt, endExclusiveDate)
+          )
+        );
 
-    return rows.map((row) => ({
-      studentId: row.studentId,
-      date: toDateOnlyString(row.createdAt)
-    }));
+      return rows.map((row) => ({
+        studentId: row.studentId,
+        date: toDateOnlyString(row.createdAt)
+      }));
+    });
   },
   async listActivityParticipatedStudents({ filters, dateRange }: DashboardTrendFunnelQueryInput) {
-    const endExclusiveDate = toUtcDate(dateRange.endDate);
-    endExclusiveDate.setUTCDate(endExclusiveDate.getUTCDate() + 1);
+    return observeMetricsQuery("metrics.listActivityParticipatedStudents", async () => {
+      const endExclusiveDate = toUtcDate(dateRange.endDate);
+      endExclusiveDate.setUTCDate(endExclusiveDate.getUTCDate() + 1);
 
-    const rows = await db
-      .select({
-        studentId: certificates.studentId,
-        createdAt: certificates.createdAt
-      })
-      .from(certificates)
-      .innerJoin(students, eq(certificates.studentId, students.id))
-      .innerJoin(classes, eq(students.classId, classes.id))
-      .innerJoin(colleges, eq(classes.collegeId, colleges.id))
-      .where(
-        and(
-          ...buildTrendFunnelConditions(filters),
-          gte(certificates.createdAt, toUtcDate(dateRange.startDate)),
-          lt(certificates.createdAt, endExclusiveDate)
-        )
-      );
+      const rows = await db
+        .select({
+          studentId: certificates.studentId,
+          createdAt: certificates.createdAt
+        })
+        .from(certificates)
+        .innerJoin(students, eq(certificates.studentId, students.id))
+        .innerJoin(classes, eq(students.classId, classes.id))
+        .innerJoin(colleges, eq(classes.collegeId, colleges.id))
+        .where(
+          and(
+            ...buildTrendFunnelConditions(filters),
+            gte(certificates.createdAt, toUtcDate(dateRange.startDate)),
+            lt(certificates.createdAt, endExclusiveDate)
+          )
+        );
 
-    return rows.map((row) => ({
-      studentId: row.studentId,
-      date: toDateOnlyString(row.createdAt)
-    }));
+      return rows.map((row) => ({
+        studentId: row.studentId,
+        date: toDateOnlyString(row.createdAt)
+      }));
+    });
   }
 };
 
-const dashboardTrendFunnelService = createDashboardTrendFunnelService({
+const rawDashboardTrendFunnelService = createDashboardTrendFunnelService({
   dashboardTrendFunnelRepo
+});
+
+const dashboardTrendFunnelService = createCachedDashboardTrendFunnelService({
+  dashboardTrendFunnelService: rawDashboardTrendFunnelService,
+  cacheStore: dashboardCacheStore,
+  cacheConfig: dashboardCacheConfig
 });
 
 const certificateFileRepo = {
