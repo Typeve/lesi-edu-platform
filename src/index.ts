@@ -42,6 +42,7 @@ import { createResourceAuthorizationService, type ResourceType } from "./modules
 import { bcryptPasswordHasher, bcryptPasswordVerifier } from "./modules/auth/password.js";
 import { createStudentAuthService } from "./modules/auth/service.js";
 import { createJwtTokenSigner, createJwtTokenVerifier } from "./modules/auth/token.js";
+import { createStudentFirstLoginVerificationService } from "./modules/auth/first-login-verification.js";
 import { createExcelImportValidationService } from "./modules/import/excel-validation.js";
 import { createCertificateUploadService } from "./modules/upload/certificate-upload.js";
 import { createAdminRoutes } from "./routes/admin.js";
@@ -57,7 +58,9 @@ const studentRepo = {
         id: students.id,
         studentNo: students.studentNo,
         passwordHash: students.passwordHash,
-        mustChangePassword: students.mustChangePassword
+        mustChangePassword: students.mustChangePassword,
+        credentialNo: students.credentialNo,
+        firstLoginVerifiedAt: students.firstLoginVerifiedAt
       })
       .from(students)
       .where(eq(students.studentNo, studentNo))
@@ -71,7 +74,9 @@ const studentRepo = {
         id: students.id,
         studentNo: students.studentNo,
         passwordHash: students.passwordHash,
-        mustChangePassword: students.mustChangePassword
+        mustChangePassword: students.mustChangePassword,
+        credentialNo: students.credentialNo,
+        firstLoginVerifiedAt: students.firstLoginVerifiedAt
       })
       .from(students)
       .where(eq(students.id, studentId))
@@ -104,6 +109,40 @@ const studentAuthService = createStudentAuthService({
     secret: env.JWT_SECRET,
     expiresInDays: env.JWT_EXPIRES_IN_DAYS
   })
+});
+
+const studentFirstLoginVerificationRepo = {
+  async findStudentFirstLoginReference(studentId: number) {
+    const records = await db
+      .select({
+        studentId: students.id,
+        name: students.name,
+        credentialNo: students.credentialNo,
+        schoolName: colleges.name,
+        majorName: majors.name,
+        firstLoginVerifiedAt: students.firstLoginVerifiedAt
+      })
+      .from(students)
+      .innerJoin(classes, eq(students.classId, classes.id))
+      .innerJoin(colleges, eq(classes.collegeId, colleges.id))
+      .leftJoin(majors, eq(classes.majorId, majors.id))
+      .where(eq(students.id, studentId))
+      .limit(1);
+
+    return records[0] ?? null;
+  },
+  async markStudentFirstLoginVerified({ studentId, verifiedAt }: { studentId: number; verifiedAt: Date }) {
+    await db
+      .update(students)
+      .set({
+        firstLoginVerifiedAt: verifiedAt
+      })
+      .where(eq(students.id, studentId));
+  }
+};
+
+const studentFirstLoginVerificationService = createStudentFirstLoginVerificationService({
+  studentFirstLoginVerificationRepo: studentFirstLoginVerificationRepo
 });
 
 const requireStudentAuth = createStudentAuthMiddleware({
@@ -679,7 +718,14 @@ app.get("/", (c) =>
 );
 
 app.route("/", healthRoutes);
-app.route("/auth", createAuthRoutes({ studentAuthService, requireStudentAuth }));
+app.route(
+  "/auth",
+  createAuthRoutes({
+    studentAuthService,
+    studentFirstLoginVerificationService,
+    requireStudentAuth
+  })
+);
 app.route(
   "/admin",
   createAdminRoutes({

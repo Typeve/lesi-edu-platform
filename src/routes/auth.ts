@@ -5,6 +5,11 @@ import {
   StudentLoginUnauthorizedError,
   type StudentAuthService
 } from "../modules/auth/service.js";
+import {
+  StudentFirstLoginVerificationMismatchError,
+  StudentFirstLoginVerificationNotFoundError,
+  type StudentFirstLoginVerificationService
+} from "../modules/auth/first-login-verification.js";
 
 interface StudentLoginRequestBody {
   studentNo: string;
@@ -16,8 +21,19 @@ interface StudentChangePasswordRequestBody {
   newPassword: string;
 }
 
+interface StudentFirstLoginVerificationRequestBody {
+  name: string;
+  credentialNo: string;
+  schoolName: string;
+  majorName: string;
+}
+
 export interface AuthRouteDependencies {
   studentAuthService: StudentAuthService;
+  studentFirstLoginVerificationService?: Pick<
+    StudentFirstLoginVerificationService,
+    "verifyStudentFirstLogin"
+  >;
   requireStudentAuth?: MiddlewareHandler;
 }
 
@@ -57,8 +73,42 @@ const isValidChangePasswordBody = (body: unknown): body is StudentChangePassword
   );
 };
 
+const isValidFirstLoginVerificationBody = (
+  body: unknown
+): body is StudentFirstLoginVerificationRequestBody => {
+  if (!body || typeof body !== "object") {
+    return false;
+  }
+
+  const name = (body as { name?: unknown }).name;
+  const credentialNo = (body as { credentialNo?: unknown }).credentialNo;
+  const schoolName = (body as { schoolName?: unknown }).schoolName;
+  const majorName = (body as { majorName?: unknown }).majorName;
+
+  return (
+    typeof name === "string" &&
+    name.trim().length > 0 &&
+    typeof credentialNo === "string" &&
+    credentialNo.trim().length > 0 &&
+    typeof schoolName === "string" &&
+    schoolName.trim().length > 0 &&
+    typeof majorName === "string" &&
+    majorName.trim().length > 0
+  );
+};
+
+const defaultStudentFirstLoginVerificationService: Pick<
+  StudentFirstLoginVerificationService,
+  "verifyStudentFirstLogin"
+> = {
+  async verifyStudentFirstLogin() {
+    throw new Error("studentFirstLoginVerificationService is not configured");
+  }
+};
+
 export const createAuthRoutes = ({
   studentAuthService,
+  studentFirstLoginVerificationService = defaultStudentFirstLoginVerificationService,
   requireStudentAuth = passThroughAuthMiddleware
 }: AuthRouteDependencies) => {
   const auth = new Hono();
@@ -124,6 +174,53 @@ export const createAuthRoutes = ({
 
       if (error instanceof InvalidNewPasswordError) {
         return c.json({ message: error.message }, 400);
+      }
+
+      throw error;
+    }
+  });
+
+  auth.post("/student/first-login-verify", requireStudentAuth, async (c) => {
+    const studentAuth = c.get("studentAuth");
+    if (!studentAuth) {
+      return c.json({ message: "unauthorized" }, 401);
+    }
+
+    let body: unknown;
+
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ message: "invalid request body" }, 400);
+    }
+
+    if (!isValidFirstLoginVerificationBody(body)) {
+      return c.json({ message: "name/credentialNo/schoolName/majorName is required" }, 400);
+    }
+
+    try {
+      const result = await studentFirstLoginVerificationService.verifyStudentFirstLogin({
+        studentId: studentAuth.studentId,
+        name: body.name.trim(),
+        credentialNo: body.credentialNo.trim(),
+        schoolName: body.schoolName.trim(),
+        majorName: body.majorName.trim()
+      });
+
+      return c.json(result, 200);
+    } catch (error) {
+      if (error instanceof StudentFirstLoginVerificationNotFoundError) {
+        return c.json({ message: "student not found" }, 404);
+      }
+
+      if (error instanceof StudentFirstLoginVerificationMismatchError) {
+        return c.json(
+          {
+            message: "first login verification failed",
+            reasons: error.reasons
+          },
+          422
+        );
       }
 
       throw error;

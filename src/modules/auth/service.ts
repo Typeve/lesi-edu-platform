@@ -6,6 +6,8 @@ export interface StudentAuthRecord {
   studentNo: string;
   passwordHash: string | null;
   mustChangePassword: boolean;
+  credentialNo?: string | null;
+  firstLoginVerifiedAt?: Date | null;
 }
 
 export interface StudentPasswordUpdateInput {
