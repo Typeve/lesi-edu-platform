@@ -54,7 +54,7 @@ export const students = mysqlTable(
       .references(() => classes.id),
     studentNo: varchar("student_no", { length: 32 }).notNull(),
     name: varchar("name", { length: 64 }).notNull(),
-    passwordHash: varchar("password_hash", { length: 255 }).notNull(),
+    passwordHash: varchar("password_hash", { length: 255 }),
     mustChangePassword: boolean("must_change_password").notNull().default(true),
     passwordUpdatedAt: timestamp("password_updated_at"),
     createdAt: timestamp("created_at").defaultNow().notNull()

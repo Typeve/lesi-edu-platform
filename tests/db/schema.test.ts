@@ -22,4 +22,7 @@ test("students should include password security fields", () => {
   assert.equal(students.passwordHash.name, "password_hash");
   assert.equal(students.mustChangePassword.name, "must_change_password");
   assert.equal(students.passwordUpdatedAt.name, "password_updated_at");
+  assert.equal(students.mustChangePassword.notNull, true);
+  assert.equal(students.mustChangePassword.hasDefault, true);
+  assert.equal(students.passwordHash.notNull, false);
 });
