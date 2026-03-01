@@ -18,26 +18,26 @@ test("drizzle migration metadata chain should be continuous", () => {
   const entries = journal.entries as Array<{ idx: number; tag: string }>;
 
   assert.ok(Array.isArray(entries), "journal entries should be an array");
-  assert.ok(entries.length >= 4, "journal should contain at least 4 entries");
+  assert.ok(entries.length >= 5, "journal should contain at least 5 entries");
 
   entries.forEach((entry, index) => {
     assert.equal(entry.idx, index, `journal idx should be continuous at ${index}`);
   });
 
-  for (const prefix of ["0000", "0001", "0002", "0003"]) {
+  for (const prefix of ["0000", "0001", "0002", "0003", "0004"]) {
     assert.ok(
       entries.some((entry) => entry.tag.startsWith(`${prefix}_`)),
       `journal should include migration ${prefix}`
     );
   }
 
-  const snapshot0002 = readJson(path.join(drizzleMetaDir, "0002_snapshot.json"));
   const snapshot0003 = readJson(path.join(drizzleMetaDir, "0003_snapshot.json"));
+  const snapshot0004 = readJson(path.join(drizzleMetaDir, "0004_snapshot.json"));
 
   assert.equal(
-    snapshot0003.prevId,
-    snapshot0002.id,
-    "0003 snapshot prevId should point to 0002 snapshot id"
+    snapshot0004.prevId,
+    snapshot0003.id,
+    "0004 snapshot prevId should point to 0003 snapshot id"
   );
 });
 
@@ -82,6 +82,23 @@ test("0003 migration file should exist and include resource authorization tables
       migrationSql,
       new RegExp(`CREATE TABLE\\s+\`${tableName}\``, "i"),
       `0003 migration should create table ${tableName}`
+    );
+  }
+});
+
+test("0004 migration file should exist and include activity and audit log tables", () => {
+  const migrationFiles = fs.readdirSync(drizzleDir);
+  const migration0004 = migrationFiles.find((fileName) => /^0004_.*\.sql$/.test(fileName));
+
+  assert.ok(migration0004, "expected a 0004 migration SQL file");
+
+  const migrationSql = fs.readFileSync(path.join(drizzleDir, migration0004), "utf8");
+
+  for (const tableName of ["activities", "audit_logs"]) {
+    assert.match(
+      migrationSql,
+      new RegExp(`CREATE TABLE\\s+\`${tableName}\``, "i"),
+      `0004 migration should create table ${tableName}`
     );
   }
 });

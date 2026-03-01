@@ -29,6 +29,13 @@
       "when": 1772375619723,
       "tag": "0003_cold_zombie",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1772376427694,
+      "tag": "0004_conscious_hex",
+      "breakpoints": true
     }
   ]
 }
