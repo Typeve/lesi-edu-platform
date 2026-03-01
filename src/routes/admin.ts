@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import {
+  InvalidNewPasswordError,
   StudentNotFoundError,
   type StudentAuthService
 } from "../modules/auth/service.js";
@@ -13,8 +14,6 @@ export interface AdminRouteDependencies {
   adminApiKey: string;
 }
 
-const MIN_PASSWORD_LENGTH = 8;
-
 const isValidResetPasswordBody = (body: unknown): body is AdminResetPasswordRequestBody => {
   if (!body || typeof body !== "object") {
     return false;
@@ -22,13 +21,17 @@ const isValidResetPasswordBody = (body: unknown): body is AdminResetPasswordRequ
 
   const newPassword = (body as { newPassword?: unknown }).newPassword;
 
-  return typeof newPassword === "string" && newPassword.trim().length >= MIN_PASSWORD_LENGTH;
+  return typeof newPassword === "string";
 };
 
 const parseStudentId = (rawId: string): number | null => {
-  const parsed = Number(rawId);
+  if (!/^[1-9]\d*$/.test(rawId)) {
+    return null;
+  }
 
-  if (!Number.isInteger(parsed) || parsed <= 0) {
+  const parsed = Number.parseInt(rawId, 10);
+
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
     return null;
   }
 
@@ -62,7 +65,7 @@ export const createAdminRoutes = ({
     }
 
     if (!isValidResetPasswordBody(body)) {
-      return c.json({ message: "newPassword is required and must be at least 8 characters" }, 400);
+      return c.json({ message: "newPassword is required" }, 400);
     }
 
     try {
@@ -73,6 +76,10 @@ export const createAdminRoutes = ({
 
       return c.json({ message: "password reset" }, 200);
     } catch (error) {
+      if (error instanceof InvalidNewPasswordError) {
+        return c.json({ message: error.message }, 400);
+      }
+
       if (error instanceof StudentNotFoundError) {
         return c.json({ message: "student not found" }, 404);
       }

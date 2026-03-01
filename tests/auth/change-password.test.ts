@@ -206,6 +206,33 @@ test("POST /auth/student/change-password should reject when old password is inco
   assert.equal(ctx.student.passwordUpdatedAt, null);
 });
 
+test("POST /auth/student/change-password should return 400 when newPassword is too short", async () => {
+  const ctx = await buildStudentContext();
+  const app = buildApp(ctx);
+  const originalHash = ctx.student.passwordHash;
+
+  const response = await app.request(changePasswordPath, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${signStudentToken(ctx)}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      oldPassword: "OldPass1!",
+      newPassword: "short1!"
+    })
+  });
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), {
+    message: "newPassword is required and must be at least 8 characters"
+  });
+  assert.equal(ctx.updateCount, 0);
+  assert.equal(ctx.student.passwordHash, originalHash);
+  assert.equal(ctx.student.mustChangePassword, true);
+  assert.equal(ctx.student.passwordUpdatedAt, null);
+});
+
 test("mustChangePassword=true should block non-change-password protected routes with 403", async () => {
   const ctx = await buildStudentContext();
 

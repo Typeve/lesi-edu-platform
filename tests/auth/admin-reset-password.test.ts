@@ -177,3 +177,67 @@ test("POST /admin/students/:id/reset-password should return 404 when student doe
 
   assert.equal(ctx.updateInputs.length, 0);
 });
+
+test("POST /admin/students/:id/reset-password should return 400 when newPassword is blank or too short", async () => {
+  for (const newPassword of ["      ", "short1!"]) {
+    const ctx: TestContext = {
+      student: {
+        id: 3003,
+        studentNo: "S20263003",
+        passwordHash: "old-hash",
+        mustChangePassword: false
+      },
+      updateInputs: []
+    };
+
+    const app = buildApp(ctx);
+
+    const response = await app.request("/admin/students/3003/reset-password", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "X-Admin-Key": adminApiKey
+      },
+      body: JSON.stringify({
+        newPassword
+      })
+    });
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), {
+      message: "newPassword is required and must be at least 8 characters"
+    });
+    assert.equal(ctx.updateInputs.length, 0);
+  }
+});
+
+test("POST /admin/students/:id/reset-password should reject non-integer student id format", async () => {
+  const ctx: TestContext = {
+    student: {
+      id: 1000,
+      studentNo: "S20261000",
+      passwordHash: "old-hash",
+      mustChangePassword: false
+    },
+    updateInputs: []
+  };
+
+  const app = buildApp(ctx);
+
+  const response = await app.request("/admin/students/1e3/reset-password", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "X-Admin-Key": adminApiKey
+    },
+    body: JSON.stringify({
+      newPassword: "ResetPass123!"
+    })
+  });
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), {
+    message: "invalid student id"
+  });
+  assert.equal(ctx.updateInputs.length, 0);
+});

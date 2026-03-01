@@ -1,5 +1,6 @@
 import { Hono, type MiddlewareHandler } from "hono";
 import {
+  InvalidNewPasswordError,
   StudentChangePasswordUnauthorizedError,
   StudentLoginUnauthorizedError,
   type StudentAuthService
@@ -119,6 +120,10 @@ export const createAuthRoutes = ({
     } catch (error) {
       if (error instanceof StudentChangePasswordUnauthorizedError) {
         return c.json({ message: "invalid old password" }, 401);
+      }
+
+      if (error instanceof InvalidNewPasswordError) {
+        return c.json({ message: error.message }, 400);
       }
 
       throw error;

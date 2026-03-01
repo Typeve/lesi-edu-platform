@@ -70,6 +70,19 @@ export class StudentNotFoundError extends Error {
   }
 }
 
+export const MIN_PASSWORD_LENGTH = 8;
+
+export const isValidNewPassword = (newPassword: string): boolean => {
+  return newPassword.trim().length >= MIN_PASSWORD_LENGTH;
+};
+
+export class InvalidNewPasswordError extends Error {
+  constructor() {
+    super(`newPassword is required and must be at least ${MIN_PASSWORD_LENGTH} characters`);
+    this.name = "InvalidNewPasswordError";
+  }
+}
+
 export interface CreateStudentAuthServiceInput {
   studentRepo: StudentAuthRepository;
   passwordVerifier: PasswordVerifier;
@@ -86,6 +99,12 @@ const isNonEmptyHash = (passwordHash: string | null): passwordHash is string => 
 const defaultPasswordHasher: PasswordHasher = {
   async hash() {
     throw new Error("passwordHasher is not configured");
+  }
+};
+
+const ensureValidNewPassword = (newPassword: string): void => {
+  if (!isValidNewPassword(newPassword)) {
+    throw new InvalidNewPasswordError();
   }
 };
 
@@ -139,6 +158,8 @@ export const createStudentAuthService = ({
         throw new StudentChangePasswordUnauthorizedError();
       }
 
+      ensureValidNewPassword(newPassword);
+
       const nextPasswordHash = await passwordHasher.hash(newPassword);
 
       await studentRepo.updateStudentPassword({
@@ -152,6 +173,8 @@ export const createStudentAuthService = ({
       studentId,
       newPassword
     }: StudentAdminResetPasswordInput): Promise<void> {
+      ensureValidNewPassword(newPassword);
+
       const student = await studentRepo.findStudentById(studentId);
 
       if (!student) {
