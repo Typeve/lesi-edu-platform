@@ -1,5 +1,5 @@
 import { serve } from "@hono/node-server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, gte, lt } from "drizzle-orm";
 import { Hono } from "hono";
 import path from "node:path";
 import { env } from "./config/env.js";
@@ -25,6 +25,10 @@ import { createActivityService } from "./modules/activity/service.js";
 import { createAuditLogService } from "./modules/audit/service.js";
 import { createAuthorizationGrantService } from "./modules/authorization/grant-service.js";
 import { createDashboardDimensionAggregationService } from "./modules/metrics/aggregation.js";
+import {
+  createDashboardTrendFunnelService,
+  type DashboardTrendFunnelQueryInput
+} from "./modules/metrics/trend-funnel.js";
 import { createResourceAuthorizationService, type ResourceType } from "./modules/authorization/service.js";
 import { bcryptPasswordHasher, bcryptPasswordVerifier } from "./modules/auth/password.js";
 import { createStudentAuthService } from "./modules/auth/service.js";
@@ -402,6 +406,178 @@ const dashboardDimensionAggregationService = createDashboardDimensionAggregation
   dashboardMetricsRepo
 });
 
+const toDateOnlyString = (value: Date | string): string => {
+  if (value instanceof Date) {
+    const year = value.getUTCFullYear();
+    const month = String(value.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(value.getUTCDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  return value.slice(0, 10);
+};
+
+const toUtcDate = (dateOnly: string): Date => {
+  return new Date(`${dateOnly}T00:00:00.000Z`);
+};
+
+const buildTrendFunnelConditions = (
+  filters: DashboardTrendFunnelQueryInput["filters"]
+) => {
+  const conditions = [];
+
+  if (filters.schoolId) {
+    conditions.push(eq(colleges.schoolId, filters.schoolId));
+  }
+  if (filters.collegeId) {
+    conditions.push(eq(classes.collegeId, filters.collegeId));
+  }
+  if (filters.majorId) {
+    conditions.push(eq(classes.majorId, filters.majorId));
+  }
+  if (filters.classId) {
+    conditions.push(eq(classes.id, filters.classId));
+  }
+
+  return conditions;
+};
+
+const dashboardTrendFunnelRepo = {
+  async listActivatedStudents({ filters, dateRange }: DashboardTrendFunnelQueryInput) {
+    const endExclusiveDate = toUtcDate(dateRange.endDate);
+    endExclusiveDate.setUTCDate(endExclusiveDate.getUTCDate() + 1);
+
+    const rows = await db
+      .select({
+        studentId: students.id,
+        createdAt: students.createdAt
+      })
+      .from(students)
+      .innerJoin(classes, eq(students.classId, classes.id))
+      .innerJoin(colleges, eq(classes.collegeId, colleges.id))
+      .where(
+        and(
+          ...buildTrendFunnelConditions(filters),
+          gte(students.createdAt, toUtcDate(dateRange.startDate)),
+          lt(students.createdAt, endExclusiveDate)
+        )
+      );
+
+    return rows.map((row) => ({
+      studentId: row.studentId,
+      date: toDateOnlyString(row.createdAt)
+    }));
+  },
+  async listAssessmentCompletedStudents({ filters, dateRange }: DashboardTrendFunnelQueryInput) {
+    const endExclusiveDate = toUtcDate(dateRange.endDate);
+    endExclusiveDate.setUTCDate(endExclusiveDate.getUTCDate() + 1);
+
+    const rows = await db
+      .select({
+        studentId: profiles.studentId,
+        createdAt: profiles.createdAt
+      })
+      .from(profiles)
+      .innerJoin(students, eq(profiles.studentId, students.id))
+      .innerJoin(classes, eq(students.classId, classes.id))
+      .innerJoin(colleges, eq(classes.collegeId, colleges.id))
+      .where(
+        and(
+          ...buildTrendFunnelConditions(filters),
+          gte(profiles.createdAt, toUtcDate(dateRange.startDate)),
+          lt(profiles.createdAt, endExclusiveDate)
+        )
+      );
+
+    return rows.map((row) => ({
+      studentId: row.studentId,
+      date: toDateOnlyString(row.createdAt)
+    }));
+  },
+  async listReportGeneratedStudents({ filters, dateRange }: DashboardTrendFunnelQueryInput) {
+    const endExclusiveDate = toUtcDate(dateRange.endDate);
+    endExclusiveDate.setUTCDate(endExclusiveDate.getUTCDate() + 1);
+
+    const rows = await db
+      .select({
+        studentId: reports.studentId,
+        createdAt: reports.createdAt
+      })
+      .from(reports)
+      .innerJoin(students, eq(reports.studentId, students.id))
+      .innerJoin(classes, eq(students.classId, classes.id))
+      .innerJoin(colleges, eq(classes.collegeId, colleges.id))
+      .where(
+        and(
+          ...buildTrendFunnelConditions(filters),
+          gte(reports.createdAt, toUtcDate(dateRange.startDate)),
+          lt(reports.createdAt, endExclusiveDate)
+        )
+      );
+
+    return rows.map((row) => ({
+      studentId: row.studentId,
+      date: toDateOnlyString(row.createdAt)
+    }));
+  },
+  async listTaskCompletedStudents({ filters, dateRange }: DashboardTrendFunnelQueryInput) {
+    const endExclusiveDate = toUtcDate(dateRange.endDate);
+    endExclusiveDate.setUTCDate(endExclusiveDate.getUTCDate() + 1);
+
+    const rows = await db
+      .select({
+        studentId: tasks.studentId,
+        createdAt: tasks.createdAt
+      })
+      .from(tasks)
+      .innerJoin(students, eq(tasks.studentId, students.id))
+      .innerJoin(classes, eq(students.classId, classes.id))
+      .innerJoin(colleges, eq(classes.collegeId, colleges.id))
+      .where(
+        and(
+          ...buildTrendFunnelConditions(filters),
+          gte(tasks.createdAt, toUtcDate(dateRange.startDate)),
+          lt(tasks.createdAt, endExclusiveDate)
+        )
+      );
+
+    return rows.map((row) => ({
+      studentId: row.studentId,
+      date: toDateOnlyString(row.createdAt)
+    }));
+  },
+  async listActivityParticipatedStudents({ filters, dateRange }: DashboardTrendFunnelQueryInput) {
+    const endExclusiveDate = toUtcDate(dateRange.endDate);
+    endExclusiveDate.setUTCDate(endExclusiveDate.getUTCDate() + 1);
+
+    const rows = await db
+      .select({
+        studentId: certificates.studentId,
+        createdAt: certificates.createdAt
+      })
+      .from(certificates)
+      .innerJoin(students, eq(certificates.studentId, students.id))
+      .innerJoin(classes, eq(students.classId, classes.id))
+      .innerJoin(colleges, eq(classes.collegeId, colleges.id))
+      .where(
+        and(
+          ...buildTrendFunnelConditions(filters),
+          gte(certificates.createdAt, toUtcDate(dateRange.startDate)),
+          lt(certificates.createdAt, endExclusiveDate)
+        )
+      );
+
+    return rows.map((row) => ({
+      studentId: row.studentId,
+      date: toDateOnlyString(row.createdAt)
+    }));
+  }
+};
+
+const dashboardTrendFunnelService = createDashboardTrendFunnelService({
+  dashboardTrendFunnelRepo
+});
+
 const certificateFileRepo = {
   async createCertificateFile({
     fileId,
@@ -463,6 +639,7 @@ app.route(
     auditLogService,
     excelImportValidationService,
     dashboardDimensionAggregationService,
+    dashboardTrendFunnelService,
     adminApiKey: env.ADMIN_API_KEY
   })
 );

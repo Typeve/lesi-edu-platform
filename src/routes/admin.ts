@@ -8,6 +8,10 @@ import {
   type DashboardFilters
 } from "../modules/metrics/aggregation.js";
 import {
+  InvalidDashboardDateRangeError,
+  type DashboardTrendFunnelService
+} from "../modules/metrics/trend-funnel.js";
+import {
   MissingImportFileError,
   UnsupportedExcelFileTypeError,
   type ExcelImportValidationService,
@@ -48,6 +52,7 @@ export interface AdminRouteDependencies {
     DashboardDimensionAggregationService,
     "aggregateByDimension"
   >;
+  dashboardTrendFunnelService?: Pick<DashboardTrendFunnelService, "getTrendAndFunnel">;
   adminApiKey: string;
 }
 
@@ -135,6 +140,26 @@ const parsePositiveIntegerQuery = (raw: string | undefined): number | undefined 
   return Number.isSafeInteger(parsed) ? parsed : null;
 };
 
+const DASHBOARD_DATE_QUERY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+const isValidDateOnly = (rawDate: string): boolean => {
+  const matched = DASHBOARD_DATE_QUERY_PATTERN.exec(rawDate);
+  if (!matched) {
+    return false;
+  }
+
+  const year = Number.parseInt(matched[1], 10);
+  const month = Number.parseInt(matched[2], 10);
+  const day = Number.parseInt(matched[3], 10);
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() + 1 === month &&
+    date.getUTCDate() === day
+  );
+};
+
 const isImportDatasetType = (datasetType: unknown): datasetType is ImportDatasetType => {
   return datasetType === "enrollment" || datasetType === "employment";
 };
@@ -201,6 +226,12 @@ const defaultDashboardDimensionAggregationService: Pick<
   }
 };
 
+const defaultDashboardTrendFunnelService: Pick<DashboardTrendFunnelService, "getTrendAndFunnel"> = {
+  async getTrendAndFunnel() {
+    throw new Error("dashboardTrendFunnelService is not configured");
+  }
+};
+
 export const createAdminRoutes = ({
   studentAuthService,
   authorizationGrantService,
@@ -208,6 +239,7 @@ export const createAdminRoutes = ({
   auditLogService,
   excelImportValidationService = defaultExcelImportValidationService,
   dashboardDimensionAggregationService = defaultDashboardDimensionAggregationService,
+  dashboardTrendFunnelService = defaultDashboardTrendFunnelService,
   adminApiKey
 }: AdminRouteDependencies) => {
   const admin = new Hono();
@@ -438,6 +470,56 @@ export const createAdminRoutes = ({
     });
 
     return c.json(result, 200);
+  });
+
+  admin.get("/dashboard/trend-funnel", async (c) => {
+    const requestAdminKey = c.req.header("x-admin-key");
+    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
+      return c.json({ message: "forbidden" }, 403);
+    }
+
+    const schoolId = parsePositiveIntegerQuery(c.req.query("schoolId"));
+    const collegeId = parsePositiveIntegerQuery(c.req.query("collegeId"));
+    const majorId = parsePositiveIntegerQuery(c.req.query("majorId"));
+    const classId = parsePositiveIntegerQuery(c.req.query("classId"));
+
+    if ([schoolId, collegeId, majorId, classId].some((value) => value === null)) {
+      return c.json({ message: "organization filter must be positive integer" }, 400);
+    }
+
+    const startDate = c.req.query("startDate");
+    const endDate = c.req.query("endDate");
+
+    if ((startDate && !isValidDateOnly(startDate)) || (endDate && !isValidDateOnly(endDate))) {
+      return c.json({ message: "startDate/endDate must be YYYY-MM-DD" }, 400);
+    }
+
+    if (startDate && endDate && startDate > endDate) {
+      return c.json({ message: "startDate must be less than or equal to endDate" }, 400);
+    }
+
+    const filters: DashboardFilters = {
+      schoolId: schoolId as number | undefined,
+      collegeId: collegeId as number | undefined,
+      majorId: majorId as number | undefined,
+      classId: classId as number | undefined
+    };
+
+    try {
+      const result = await dashboardTrendFunnelService.getTrendAndFunnel({
+        filters,
+        startDate,
+        endDate
+      });
+
+      return c.json(result, 200);
+    } catch (error) {
+      if (error instanceof InvalidDashboardDateRangeError) {
+        return c.json({ message: error.message }, 400);
+      }
+
+      throw error;
+    }
   });
 
   return admin;
