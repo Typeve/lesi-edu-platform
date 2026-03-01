@@ -15,9 +15,11 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.13.8",
+    "bcryptjs": "^3.0.3",
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.38.2",
     "hono": "^4.6.15",
+    "jsonwebtoken": "^9.0.3",
     "mysql2": "^3.12.0"
   },
   "devDependencies": {

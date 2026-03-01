@@ -42,7 +42,7 @@ npm run db:migrate
 npm run db:studio
 ```
 
-## 当前数据模型（B01）
+## 当前能力（B01 + B02）
 
 - 组织层级：`schools` / `colleges` / `classes` / `students`
 - 角色：`roles`（student/teacher/admin）
@@ -50,6 +50,11 @@ npm run db:studio
 - 角色范围关联：`role_scopes`
 
 支持通过 `class_id` / `student_id` 表达授权范围。
+
+- 认证能力：
+  - 学生登录：`POST /auth/student/login`（JWT）
+  - 学生改密：`POST /auth/student/change-password`（旧密码校验）
+  - 管理员重置：`POST /admin/students/:id/reset-password`（`X-Admin-Key`）
 
 ## 健康检查
 
