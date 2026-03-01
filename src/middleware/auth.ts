@@ -18,9 +18,11 @@ export interface CreateStudentAuthMiddlewareInput {
   tokenVerifier: StudentTokenVerifier;
   studentRepo: Pick<StudentAuthRepository, "findStudentById">;
   changePasswordPath?: string;
+  firstLoginVerifyPath?: string;
 }
 
 const DEFAULT_CHANGE_PASSWORD_PATH = "/auth/student/change-password";
+const DEFAULT_FIRST_LOGIN_VERIFY_PATH = "/auth/student/first-login-verify";
 const BEARER_TOKEN_PATTERN = /^bearer\s+(\S+)\s*$/i;
 
 const parseBearerToken = (authorizationHeader: string | undefined): string | null => {
@@ -40,7 +42,8 @@ const parseBearerToken = (authorizationHeader: string | undefined): string | nul
 export const createStudentAuthMiddleware = ({
   tokenVerifier,
   studentRepo,
-  changePasswordPath = DEFAULT_CHANGE_PASSWORD_PATH
+  changePasswordPath = DEFAULT_CHANGE_PASSWORD_PATH,
+  firstLoginVerifyPath = DEFAULT_FIRST_LOGIN_VERIFY_PATH
 }: CreateStudentAuthMiddlewareInput): MiddlewareHandler => {
   return async (c, next) => {
     const token = parseBearerToken(c.req.header("authorization"));
@@ -69,6 +72,14 @@ export const createStudentAuthMiddleware = ({
 
     if (student.mustChangePassword && c.req.path !== changePasswordPath) {
       return c.json({ message: "password change required" }, 403);
+    }
+
+    if (
+      student.firstLoginVerifiedAt === null &&
+      c.req.path !== changePasswordPath &&
+      c.req.path !== firstLoginVerifyPath
+    ) {
+      return c.json({ message: "first login verification required" }, 403);
     }
 
     await next();

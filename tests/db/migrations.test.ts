@@ -130,3 +130,15 @@ test("0006 migration file should include major dimension and report direction up
   assert.match(migrationSql, /ADD\s+`major_id`\s+int/i);
   assert.match(migrationSql, /ADD\s+`direction`/i);
 });
+
+test("0007 migration file should include student first-login verification fields", () => {
+  const migrationFiles = fs.readdirSync(drizzleDir);
+  const migration0007 = migrationFiles.find((fileName) => /^0007_.*\.sql$/.test(fileName));
+
+  assert.ok(migration0007, "expected a 0007 migration SQL file");
+
+  const migrationSql = fs.readFileSync(path.join(drizzleDir, migration0007), "utf8");
+
+  assert.match(migrationSql, /ADD\s+`credential_no`\s+varchar\(32\)/i);
+  assert.match(migrationSql, /ADD\s+`first_login_verified_at`\s+timestamp/i);
+});
