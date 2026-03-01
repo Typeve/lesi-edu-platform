@@ -1,6 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { authScopes, roleScopes, roles, students } from "../../src/db/schema.ts";
+import {
+  authScopes,
+  certificates,
+  profiles,
+  reports,
+  roleScopes,
+  roles,
+  students,
+  tasks,
+  teacherClassGrants,
+  teacherStudentGrants
+} from "../../src/db/schema.ts";
 
 test("schema should expose role/scope association tables", () => {
   assert.equal(roles[Symbol.for("drizzle:Name")], "roles");
@@ -25,4 +36,20 @@ test("students should include password security fields", () => {
   assert.equal(students.mustChangePassword.notNull, true);
   assert.equal(students.mustChangePassword.hasDefault, true);
   assert.equal(students.passwordHash.notNull, false);
+});
+
+test("schema should include resource and grant authorization tables", () => {
+  assert.equal(reports[Symbol.for("drizzle:Name")], "reports");
+  assert.equal(tasks[Symbol.for("drizzle:Name")], "tasks");
+  assert.equal(certificates[Symbol.for("drizzle:Name")], "certificates");
+  assert.equal(profiles[Symbol.for("drizzle:Name")], "profiles");
+  assert.equal(teacherStudentGrants[Symbol.for("drizzle:Name")], "teacher_student_grants");
+  assert.equal(teacherClassGrants[Symbol.for("drizzle:Name")], "teacher_class_grants");
+
+  assert.equal(reports.studentId.name, "student_id");
+  assert.equal(tasks.studentId.name, "student_id");
+  assert.equal(certificates.studentId.name, "student_id");
+  assert.equal(profiles.studentId.name, "student_id");
+  assert.equal(teacherStudentGrants.teacherId.name, "teacher_id");
+  assert.equal(teacherClassGrants.classId.name, "class_id");
 });

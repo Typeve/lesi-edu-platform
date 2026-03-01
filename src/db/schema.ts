@@ -65,6 +65,102 @@ export const students = mysqlTable(
   })
 );
 
+export const reports = mysqlTable(
+  "reports",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    studentId: int("student_id")
+      .notNull()
+      .references(() => students.id),
+    createdAt: timestamp("created_at").defaultNow().notNull()
+  },
+  (table) => ({
+    studentIdIdx: index("reports_student_id_idx").on(table.studentId)
+  })
+);
+
+export const tasks = mysqlTable(
+  "tasks",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    studentId: int("student_id")
+      .notNull()
+      .references(() => students.id),
+    createdAt: timestamp("created_at").defaultNow().notNull()
+  },
+  (table) => ({
+    studentIdIdx: index("tasks_student_id_idx").on(table.studentId)
+  })
+);
+
+export const certificates = mysqlTable(
+  "certificates",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    studentId: int("student_id")
+      .notNull()
+      .references(() => students.id),
+    createdAt: timestamp("created_at").defaultNow().notNull()
+  },
+  (table) => ({
+    studentIdIdx: index("certificates_student_id_idx").on(table.studentId)
+  })
+);
+
+export const profiles = mysqlTable(
+  "profiles",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    studentId: int("student_id")
+      .notNull()
+      .references(() => students.id),
+    createdAt: timestamp("created_at").defaultNow().notNull()
+  },
+  (table) => ({
+    studentIdIdx: index("profiles_student_id_idx").on(table.studentId)
+  })
+);
+
+export const teacherStudentGrants = mysqlTable(
+  "teacher_student_grants",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    teacherId: varchar("teacher_id", { length: 64 }).notNull(),
+    studentId: int("student_id")
+      .notNull()
+      .references(() => students.id),
+    createdAt: timestamp("created_at").defaultNow().notNull()
+  },
+  (table) => ({
+    teacherStudentUnique: uniqueIndex("teacher_student_grants_teacher_student_unique").on(
+      table.teacherId,
+      table.studentId
+    ),
+    teacherIdIdx: index("teacher_student_grants_teacher_id_idx").on(table.teacherId),
+    studentIdIdx: index("teacher_student_grants_student_id_idx").on(table.studentId)
+  })
+);
+
+export const teacherClassGrants = mysqlTable(
+  "teacher_class_grants",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    teacherId: varchar("teacher_id", { length: 64 }).notNull(),
+    classId: int("class_id")
+      .notNull()
+      .references(() => classes.id),
+    createdAt: timestamp("created_at").defaultNow().notNull()
+  },
+  (table) => ({
+    teacherClassUnique: uniqueIndex("teacher_class_grants_teacher_class_unique").on(
+      table.teacherId,
+      table.classId
+    ),
+    teacherIdIdx: index("teacher_class_grants_teacher_id_idx").on(table.teacherId),
+    classIdIdx: index("teacher_class_grants_class_id_idx").on(table.classId)
+  })
+);
+
 export const roles = mysqlTable(
   "roles",
   {
