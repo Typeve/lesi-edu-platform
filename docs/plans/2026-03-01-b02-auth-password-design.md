@@ -35,7 +35,7 @@ Session 方案；实现成本偏高，不适配当前阶段。
 
 ## 数据模型增量
 在 `students` 表新增：
-- `password_hash` (varchar, not null)
+- `password_hash` (varchar, 当前阶段可空；通过前向兼容迁移修正历史 not null 环境，认证逻辑按需拦截未初始化密码)
 - `must_change_password` (boolean/tinyint, not null, default true)
 - `password_updated_at` (timestamp, nullable)
 
