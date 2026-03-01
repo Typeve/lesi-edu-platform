@@ -9,6 +9,7 @@ import { bcryptPasswordHasher, bcryptPasswordVerifier } from "./modules/auth/pas
 import { createStudentAuthService } from "./modules/auth/service.js";
 import { createJwtTokenSigner, createJwtTokenVerifier } from "./modules/auth/token.js";
 import { createAuthRoutes } from "./routes/auth.js";
+import { createAdminRoutes } from "./routes/admin.js";
 import healthRoutes from "./routes/health.js";
 
 const studentRepo = {
@@ -85,6 +86,13 @@ app.get("/", (c) =>
 
 app.route("/", healthRoutes);
 app.route("/auth", createAuthRoutes({ studentAuthService, requireStudentAuth }));
+app.route(
+  "/admin",
+  createAdminRoutes({
+    studentAuthService,
+    adminApiKey: env.ADMIN_API_KEY
+  })
+);
 
 serve(
   {

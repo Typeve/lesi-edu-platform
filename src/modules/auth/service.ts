@@ -38,9 +38,15 @@ export interface StudentChangePasswordInput {
   newPassword: string;
 }
 
+export interface StudentAdminResetPasswordInput {
+  studentId: number;
+  newPassword: string;
+}
+
 export interface StudentAuthService {
   loginStudent(input: StudentLoginInput): Promise<StudentLoginResult>;
   changeStudentPassword(input: StudentChangePasswordInput): Promise<void>;
+  resetStudentPasswordByAdmin(input: StudentAdminResetPasswordInput): Promise<void>;
 }
 
 export class StudentLoginUnauthorizedError extends Error {
@@ -54,6 +60,13 @@ export class StudentChangePasswordUnauthorizedError extends Error {
   constructor() {
     super("invalid old password");
     this.name = "StudentChangePasswordUnauthorizedError";
+  }
+}
+
+export class StudentNotFoundError extends Error {
+  constructor() {
+    super("student not found");
+    this.name = "StudentNotFoundError";
   }
 }
 
@@ -133,6 +146,25 @@ export const createStudentAuthService = ({
         passwordHash: nextPasswordHash,
         passwordUpdatedAt: new Date(),
         mustChangePassword: false
+      });
+    },
+    async resetStudentPasswordByAdmin({
+      studentId,
+      newPassword
+    }: StudentAdminResetPasswordInput): Promise<void> {
+      const student = await studentRepo.findStudentById(studentId);
+
+      if (!student) {
+        throw new StudentNotFoundError();
+      }
+
+      const nextPasswordHash = await passwordHasher.hash(newPassword);
+
+      await studentRepo.updateStudentPassword({
+        studentId,
+        passwordHash: nextPasswordHash,
+        passwordUpdatedAt: new Date(),
+        mustChangePassword: true
       });
     }
   };
