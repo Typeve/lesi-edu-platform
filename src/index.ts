@@ -25,6 +25,7 @@ import { createResourceAuthorizationService, type ResourceType } from "./modules
 import { bcryptPasswordHasher, bcryptPasswordVerifier } from "./modules/auth/password.js";
 import { createStudentAuthService } from "./modules/auth/service.js";
 import { createJwtTokenSigner, createJwtTokenVerifier } from "./modules/auth/token.js";
+import { createExcelImportValidationService } from "./modules/import/excel-validation.js";
 import { createCertificateUploadService } from "./modules/upload/certificate-upload.js";
 import { createAdminRoutes } from "./routes/admin.js";
 import { createAuthRoutes } from "./routes/auth.js";
@@ -268,6 +269,8 @@ const auditLogService = createAuditLogService({
   auditLogRepo
 });
 
+const excelImportValidationService = createExcelImportValidationService();
+
 const certificateFileRepo = {
   async createCertificateFile({
     fileId,
@@ -327,6 +330,7 @@ app.route(
     authorizationGrantService,
     activityService,
     auditLogService,
+    excelImportValidationService,
     adminApiKey: env.ADMIN_API_KEY
   })
 );
