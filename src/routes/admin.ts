@@ -3,6 +3,13 @@ import type { ActivityService, ActivityType } from "../modules/activity/service.
 import type { AuditLogService } from "../modules/audit/service.js";
 import type { AuthorizationGrantService, GrantType } from "../modules/authorization/grant-service.js";
 import {
+  MissingImportFileError,
+  UnsupportedExcelFileTypeError,
+  type ExcelImportValidationService,
+  type ImportDatasetType,
+  type UploadedExcelFile
+} from "../modules/import/excel-validation.js";
+import {
   InvalidNewPasswordError,
   StudentNotFoundError,
   type StudentAuthService
@@ -31,6 +38,7 @@ export interface AdminRouteDependencies {
     AuditLogService,
     "logAuthorizationGrant" | "logAuthorizationRevoke" | "logPasswordReset" | "logActivityPublish"
   >;
+  excelImportValidationService?: Pick<ExcelImportValidationService, "validateExcelImport">;
   adminApiKey: string;
 }
 
@@ -101,6 +109,48 @@ const isForbiddenByAdminKey = (requestAdminKey: string | undefined, adminApiKey:
   return !requestAdminKey || requestAdminKey !== adminApiKey;
 };
 
+const isImportDatasetType = (datasetType: unknown): datasetType is ImportDatasetType => {
+  return datasetType === "enrollment" || datasetType === "employment";
+};
+
+const resolveDatasetType = (rawDatasetType: unknown): ImportDatasetType | null => {
+  if (typeof rawDatasetType !== "string") {
+    return null;
+  }
+
+  const datasetType = rawDatasetType.trim();
+  return isImportDatasetType(datasetType) ? datasetType : null;
+};
+
+const isUploadedExcelFile = (value: unknown): value is UploadedExcelFile => {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as {
+    name?: unknown;
+    type?: unknown;
+    size?: unknown;
+    arrayBuffer?: unknown;
+  };
+
+  return (
+    typeof candidate.name === "string" &&
+    typeof candidate.type === "string" &&
+    typeof candidate.size === "number" &&
+    typeof candidate.arrayBuffer === "function"
+  );
+};
+
+const resolveImportFile = (body: Record<string, unknown>): UploadedExcelFile | null => {
+  const fileField = body.file;
+  if (Array.isArray(fileField)) {
+    return null;
+  }
+
+  return isUploadedExcelFile(fileField) ? fileField : null;
+};
+
 const resolveOperator = (rawOperator: string | undefined): string => {
   if (!rawOperator) {
     return "system-admin";
@@ -110,11 +160,18 @@ const resolveOperator = (rawOperator: string | undefined): string => {
   return operator.length > 0 ? operator : "system-admin";
 };
 
+const defaultExcelImportValidationService: Pick<ExcelImportValidationService, "validateExcelImport"> = {
+  async validateExcelImport() {
+    throw new Error("excelImportValidationService is not configured");
+  }
+};
+
 export const createAdminRoutes = ({
   studentAuthService,
   authorizationGrantService,
   activityService,
   auditLogService,
+  excelImportValidationService = defaultExcelImportValidationService,
   adminApiKey
 }: AdminRouteDependencies) => {
   const admin = new Hono();
@@ -270,6 +327,46 @@ export const createAdminRoutes = ({
     });
 
     return c.json({ message: "activity published" }, 201);
+  });
+
+  admin.post("/imports/excel/validate", async (c) => {
+    const requestAdminKey = c.req.header("x-admin-key");
+    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
+      return c.json({ message: "forbidden" }, 403);
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      body = await c.req.parseBody({ all: true });
+    } catch {
+      return c.json({ message: "invalid request body" }, 400);
+    }
+
+    const datasetType = resolveDatasetType(body.datasetType);
+    if (!datasetType) {
+      return c.json({ message: "datasetType must be enrollment or employment" }, 400);
+    }
+
+    const file = resolveImportFile(body);
+
+    try {
+      const result = await excelImportValidationService.validateExcelImport({
+        datasetType,
+        file
+      });
+
+      return c.json(result, 200);
+    } catch (error) {
+      if (error instanceof MissingImportFileError) {
+        return c.json({ message: "file is required" }, 400);
+      }
+
+      if (error instanceof UnsupportedExcelFileTypeError) {
+        return c.json({ message: "unsupported file type" }, 415);
+      }
+
+      throw error;
+    }
   });
 
   return admin;
