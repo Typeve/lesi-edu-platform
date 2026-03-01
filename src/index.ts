@@ -4,6 +4,8 @@ import { Hono } from "hono";
 import { env } from "./config/env.js";
 import { db } from "./db/client.js";
 import {
+  activities,
+  auditLogs,
   certificates,
   profiles,
   reports,
@@ -14,6 +16,9 @@ import {
 } from "./db/schema.js";
 import { createStudentAuthMiddleware } from "./middleware/auth.js";
 import { createResourceAuthorizationMiddleware } from "./middleware/resource-authorization.js";
+import { createActivityService } from "./modules/activity/service.js";
+import { createAuditLogService } from "./modules/audit/service.js";
+import { createAuthorizationGrantService } from "./modules/authorization/grant-service.js";
 import { createResourceAuthorizationService, type ResourceType } from "./modules/authorization/service.js";
 import { bcryptPasswordHasher, bcryptPasswordVerifier } from "./modules/auth/password.js";
 import { createStudentAuthService } from "./modules/auth/service.js";
@@ -163,6 +168,102 @@ const resourceAuthorizationService = createResourceAuthorizationService({
   authorizationRepo
 });
 
+const authorizationGrantRepo = {
+  async assignStudentGrant(teacherId: string, studentId: number): Promise<void> {
+    const existing = await db
+      .select({ id: teacherStudentGrants.id })
+      .from(teacherStudentGrants)
+      .where(and(eq(teacherStudentGrants.teacherId, teacherId), eq(teacherStudentGrants.studentId, studentId)))
+      .limit(1);
+
+    if (existing.length > 0) {
+      return;
+    }
+
+    await db.insert(teacherStudentGrants).values({
+      teacherId,
+      studentId
+    });
+  },
+  async revokeStudentGrant(teacherId: string, studentId: number): Promise<void> {
+    await db
+      .delete(teacherStudentGrants)
+      .where(and(eq(teacherStudentGrants.teacherId, teacherId), eq(teacherStudentGrants.studentId, studentId)));
+  },
+  async assignClassGrant(teacherId: string, classId: number): Promise<void> {
+    const existing = await db
+      .select({ id: teacherClassGrants.id })
+      .from(teacherClassGrants)
+      .where(and(eq(teacherClassGrants.teacherId, teacherId), eq(teacherClassGrants.classId, classId)))
+      .limit(1);
+
+    if (existing.length > 0) {
+      return;
+    }
+
+    await db.insert(teacherClassGrants).values({
+      teacherId,
+      classId
+    });
+  },
+  async revokeClassGrant(teacherId: string, classId: number): Promise<void> {
+    await db
+      .delete(teacherClassGrants)
+      .where(and(eq(teacherClassGrants.teacherId, teacherId), eq(teacherClassGrants.classId, classId)));
+  }
+};
+
+const authorizationGrantService = createAuthorizationGrantService({
+  authorizationGrantRepo
+});
+
+const activityRepo = {
+  async publishActivity({
+    activityType,
+    title
+  }: {
+    activityType: "course" | "competition" | "project";
+    title: string;
+  }): Promise<void> {
+    await db.insert(activities).values({
+      activityType,
+      title
+    });
+  }
+};
+
+const activityService = createActivityService({
+  activityRepo
+});
+
+const auditLogRepo = {
+  async createAuditLog({
+    operator,
+    action,
+    target,
+    detail,
+    createdAt
+  }: {
+    operator: string;
+    action: "authorization_grant" | "authorization_revoke" | "password_reset" | "activity_publish";
+    target: string;
+    detail: string | null;
+    createdAt: Date;
+  }): Promise<void> {
+    await db.insert(auditLogs).values({
+      operator,
+      action,
+      target,
+      detail,
+      createdAt
+    });
+  }
+};
+
+const auditLogService = createAuditLogService({
+  auditLogRepo
+});
+
 const createResourceAuthorization = (resourceType: ResourceType) =>
   createResourceAuthorizationMiddleware({
     resourceType,
@@ -184,6 +285,9 @@ app.route(
   "/admin",
   createAdminRoutes({
     studentAuthService,
+    authorizationGrantService,
+    activityService,
+    auditLogService,
     adminApiKey: env.ADMIN_API_KEY
   })
 );

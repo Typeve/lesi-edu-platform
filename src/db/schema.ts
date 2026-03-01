@@ -161,6 +161,41 @@ export const teacherClassGrants = mysqlTable(
   })
 );
 
+export const activities = mysqlTable(
+  "activities",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    activityType: mysqlEnum("activity_type", ["course", "competition", "project"]).notNull(),
+    title: varchar("title", { length: 128 }).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull()
+  },
+  (table) => ({
+    activityTypeIdx: index("activities_activity_type_idx").on(table.activityType)
+  })
+);
+
+export const auditLogs = mysqlTable(
+  "audit_logs",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    operator: varchar("operator", { length: 64 }).notNull(),
+    action: mysqlEnum("action", [
+      "authorization_grant",
+      "authorization_revoke",
+      "password_reset",
+      "activity_publish"
+    ]).notNull(),
+    target: varchar("target", { length: 191 }).notNull(),
+    detail: varchar("detail", { length: 255 }),
+    createdAt: timestamp("created_at").defaultNow().notNull()
+  },
+  (table) => ({
+    actionIdx: index("audit_logs_action_idx").on(table.action),
+    operatorIdx: index("audit_logs_operator_idx").on(table.operator),
+    targetIdx: index("audit_logs_target_idx").on(table.target)
+  })
+);
+
 export const roles = mysqlTable(
   "roles",
   {

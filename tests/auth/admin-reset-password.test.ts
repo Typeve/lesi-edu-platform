@@ -14,6 +14,7 @@ const adminApiKey = "admin-secret-key";
 interface TestContext {
   student: StudentAuthRecord | null;
   updateInputs: StudentPasswordUpdateInput[];
+  auditActions: string[];
 }
 
 function buildStudentRepo(ctx: TestContext): StudentAuthRepository {
@@ -60,6 +61,33 @@ function buildApp(ctx: TestContext): Hono {
     "/admin",
     createAdminRoutes({
       studentAuthService: service,
+      authorizationGrantService: {
+        async assignGrant() {
+          return;
+        },
+        async revokeGrant() {
+          return;
+        }
+      },
+      activityService: {
+        async publishActivity() {
+          return;
+        }
+      },
+      auditLogService: {
+        async logAuthorizationGrant() {
+          ctx.auditActions.push("authorization_grant");
+        },
+        async logAuthorizationRevoke() {
+          ctx.auditActions.push("authorization_revoke");
+        },
+        async logPasswordReset() {
+          ctx.auditActions.push("password_reset");
+        },
+        async logActivityPublish() {
+          ctx.auditActions.push("activity_publish");
+        }
+      },
       adminApiKey
     })
   );
@@ -75,7 +103,8 @@ test("POST /admin/students/:id/reset-password should return 403 when X-Admin-Key
       passwordHash: "old-hash",
       mustChangePassword: false
     },
-    updateInputs: []
+    updateInputs: [],
+    auditActions: []
   };
 
   const app = buildApp(ctx);
@@ -111,6 +140,7 @@ test("POST /admin/students/:id/reset-password should return 403 when X-Admin-Key
     message: "forbidden"
   });
   assert.equal(ctx.updateInputs.length, 0);
+  assert.deepEqual(ctx.auditActions, []);
 });
 
 test("POST /admin/students/:id/reset-password should update password with mustChangePassword=true when admin key is valid", async () => {
@@ -121,7 +151,8 @@ test("POST /admin/students/:id/reset-password should update password with mustCh
       passwordHash: "old-hash",
       mustChangePassword: false
     },
-    updateInputs: []
+    updateInputs: [],
+    auditActions: []
   };
 
   const app = buildApp(ctx);
@@ -149,12 +180,14 @@ test("POST /admin/students/:id/reset-password should update password with mustCh
   assert.equal(updateInput.passwordHash, "hashed:ResetPass123!");
   assert.equal(updateInput.mustChangePassword, true);
   assert.ok(updateInput.passwordUpdatedAt instanceof Date);
+  assert.deepEqual(ctx.auditActions, ["password_reset"]);
 });
 
 test("POST /admin/students/:id/reset-password should return 404 when student does not exist", async () => {
   const ctx: TestContext = {
     student: null,
-    updateInputs: []
+    updateInputs: [],
+    auditActions: []
   };
 
   const app = buildApp(ctx);
@@ -176,6 +209,7 @@ test("POST /admin/students/:id/reset-password should return 404 when student doe
   });
 
   assert.equal(ctx.updateInputs.length, 0);
+  assert.deepEqual(ctx.auditActions, []);
 });
 
 test("POST /admin/students/:id/reset-password should return 400 when newPassword is blank or too short", async () => {
@@ -187,7 +221,8 @@ test("POST /admin/students/:id/reset-password should return 400 when newPassword
         passwordHash: "old-hash",
         mustChangePassword: false
       },
-      updateInputs: []
+      updateInputs: [],
+      auditActions: []
     };
 
     const app = buildApp(ctx);
@@ -208,6 +243,7 @@ test("POST /admin/students/:id/reset-password should return 400 when newPassword
       message: "newPassword is required and must be at least 8 characters"
     });
     assert.equal(ctx.updateInputs.length, 0);
+    assert.deepEqual(ctx.auditActions, []);
   }
 });
 
@@ -219,7 +255,8 @@ test("POST /admin/students/:id/reset-password should reject non-integer student 
       passwordHash: "old-hash",
       mustChangePassword: false
     },
-    updateInputs: []
+    updateInputs: [],
+    auditActions: []
   };
 
   const app = buildApp(ctx);
@@ -240,4 +277,5 @@ test("POST /admin/students/:id/reset-password should reject non-integer student 
     message: "invalid student id"
   });
   assert.equal(ctx.updateInputs.length, 0);
+  assert.deepEqual(ctx.auditActions, []);
 });

@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  activities,
   authScopes,
+  auditLogs,
   certificates,
   profiles,
   reports,
@@ -52,4 +54,17 @@ test("schema should include resource and grant authorization tables", () => {
   assert.equal(profiles.studentId.name, "student_id");
   assert.equal(teacherStudentGrants.teacherId.name, "teacher_id");
   assert.equal(teacherClassGrants.classId.name, "class_id");
+});
+
+test("schema should include activity and audit log tables", () => {
+  assert.equal(activities[Symbol.for("drizzle:Name")], "activities");
+  assert.equal(auditLogs[Symbol.for("drizzle:Name")], "audit_logs");
+
+  assert.equal(activities.activityType.name, "activity_type");
+  assert.equal(activities.title.name, "title");
+
+  assert.equal(auditLogs.operator.name, "operator");
+  assert.equal(auditLogs.action.name, "action");
+  assert.equal(auditLogs.target.name, "target");
+  assert.equal(auditLogs.createdAt.name, "created_at");
 });
