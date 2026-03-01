@@ -1,15 +1,8 @@
-import { eq } from "drizzle-orm";
 import { Hono } from "hono";
-import { env } from "../config/env.js";
-import { db } from "../db/client.js";
-import { students } from "../db/schema.js";
-import { bcryptPasswordVerifier, type PasswordVerifier } from "../modules/auth/password.js";
 import {
-  createStudentAuthService,
   StudentLoginUnauthorizedError,
-  type StudentAuthRepository
+  type StudentAuthService
 } from "../modules/auth/service.js";
-import { createJwtTokenSigner, type StudentTokenSigner } from "../modules/auth/token.js";
 
 interface StudentLoginRequestBody {
   studentNo: string;
@@ -17,29 +10,8 @@ interface StudentLoginRequestBody {
 }
 
 export interface AuthRouteDependencies {
-  studentRepo: StudentAuthRepository;
-  passwordVerifier: PasswordVerifier;
-  tokenSigner: StudentTokenSigner;
+  studentAuthService: StudentAuthService;
 }
-
-const createDbStudentRepository = (): StudentAuthRepository => {
-  return {
-    async findStudentByNo(studentNo) {
-      const records = await db
-        .select({
-          id: students.id,
-          studentNo: students.studentNo,
-          passwordHash: students.passwordHash,
-          mustChangePassword: students.mustChangePassword
-        })
-        .from(students)
-        .where(eq(students.studentNo, studentNo))
-        .limit(1);
-
-      return records[0] ?? null;
-    }
-  };
-};
 
 const isValidLoginBody = (body: unknown): body is StudentLoginRequestBody => {
   if (!body || typeof body !== "object") {
@@ -57,18 +29,7 @@ const isValidLoginBody = (body: unknown): body is StudentLoginRequestBody => {
   );
 };
 
-export const createAuthRoutes = (deps: Partial<AuthRouteDependencies> = {}) => {
-  const studentAuthService = createStudentAuthService({
-    studentRepo: deps.studentRepo ?? createDbStudentRepository(),
-    passwordVerifier: deps.passwordVerifier ?? bcryptPasswordVerifier,
-    tokenSigner:
-      deps.tokenSigner ??
-      createJwtTokenSigner({
-        secret: env.JWT_SECRET,
-        expiresInDays: env.JWT_EXPIRES_IN_DAYS
-      })
-  });
-
+export const createAuthRoutes = ({ studentAuthService }: AuthRouteDependencies) => {
   const auth = new Hono();
 
   auth.post("/student/login", async (c) => {
@@ -85,7 +46,10 @@ export const createAuthRoutes = (deps: Partial<AuthRouteDependencies> = {}) => {
     }
 
     try {
-      const result = await studentAuthService.loginStudent(body);
+      const result = await studentAuthService.loginStudent({
+        studentNo: body.studentNo.trim(),
+        password: body.password
+      });
       return c.json(result, 200);
     } catch (error) {
       if (error instanceof StudentLoginUnauthorizedError) {

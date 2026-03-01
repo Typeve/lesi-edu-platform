@@ -4,21 +4,22 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { Hono } from "hono";
 import { createAuthRoutes } from "../../src/routes/auth.ts";
-import type { StudentAuthRepository } from "../../src/modules/auth/service.ts";
+import {
+  createStudentAuthService,
+  StudentLoginUnauthorizedError,
+  type StudentAuthRepository
+} from "../../src/modules/auth/service.ts";
+import { bcryptPasswordVerifier } from "../../src/modules/auth/password.ts";
 import { createJwtTokenSigner, type StudentTokenSigner } from "../../src/modules/auth/token.ts";
 
 const loginPath = "/auth/student/login";
 
-function mountAuthApp(
-  studentRepo: StudentAuthRepository,
-  tokenSigner: StudentTokenSigner
-): Hono {
+function mountAuthApp(studentAuthService: ReturnType<typeof createStudentAuthService>): Hono {
   const app = new Hono();
   app.route(
     "/auth",
     createAuthRoutes({
-      studentRepo,
-      tokenSigner
+      studentAuthService
     })
   );
   return app;
@@ -47,7 +48,13 @@ test("POST /auth/student/login should return token, expiresIn, mustChangePasswor
     }
   };
 
-  const app = mountAuthApp(studentRepo, tokenSigner);
+  const app = mountAuthApp(
+    createStudentAuthService({
+      studentRepo,
+      passwordVerifier: bcryptPasswordVerifier,
+      tokenSigner
+    })
+  );
 
   const response = await app.request(loginPath, {
     method: "POST",
@@ -67,6 +74,56 @@ test("POST /auth/student/login should return token, expiresIn, mustChangePasswor
   assert.deepEqual(signedPayload, {
     studentId: 101,
     studentNo: "S20260001"
+  });
+});
+
+test("POST /auth/student/login should trim studentNo before passing to service", async () => {
+  const expectedStudentNo = "S20269999";
+
+  const studentRepo: StudentAuthRepository = {
+    async findStudentByNo(studentNo) {
+      if (studentNo === expectedStudentNo) {
+        return {
+          id: 88,
+          studentNo,
+          passwordHash: await bcrypt.hash("TrimPass1!", 4),
+          mustChangePassword: false
+        };
+      }
+
+      return null;
+    }
+  };
+
+  const tokenSigner: StudentTokenSigner = {
+    expiresIn: 7 * 24 * 60 * 60,
+    signStudentToken() {
+      return "trim.login.token";
+    }
+  };
+
+  const app = mountAuthApp(
+    createStudentAuthService({
+      studentRepo,
+      passwordVerifier: bcryptPasswordVerifier,
+      tokenSigner
+    })
+  );
+
+  const response = await app.request(loginPath, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      studentNo: `  ${expectedStudentNo}  `,
+      password: "TrimPass1!"
+    })
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    token: "trim.login.token",
+    expiresIn: 7 * 24 * 60 * 60,
+    mustChangePassword: false
   });
 });
 
@@ -104,7 +161,13 @@ test("POST /auth/student/login should return unified 401 for missing account, wr
     }
   };
 
-  const app = mountAuthApp(studentRepo, tokenSigner);
+  const app = mountAuthApp(
+    createStudentAuthService({
+      studentRepo,
+      passwordVerifier: bcryptPasswordVerifier,
+      tokenSigner
+    })
+  );
 
   const cases = [
     { studentNo: "S-NOT-FOUND", password: "whatever" },
@@ -124,6 +187,56 @@ test("POST /auth/student/login should return unified 401 for missing account, wr
       message: "invalid studentNo or password"
     });
   }
+});
+
+test("loginStudent should still execute password compare for missing account and empty hash", async () => {
+  const comparedHashes: string[] = [];
+
+  const service = createStudentAuthService({
+    studentRepo: {
+      async findStudentByNo(studentNo) {
+        if (studentNo === "S-EMPTY") {
+          return {
+            id: 3,
+            studentNo,
+            passwordHash: null,
+            mustChangePassword: true
+          };
+        }
+
+        return null;
+      }
+    },
+    passwordVerifier: {
+      async compare(_, passwordHash) {
+        comparedHashes.push(passwordHash);
+        return false;
+      }
+    },
+    tokenSigner: {
+      expiresIn: 7 * 24 * 60 * 60,
+      signStudentToken() {
+        return "unused";
+      }
+    }
+  });
+
+  await assert.rejects(
+    async () => {
+      await service.loginStudent({ studentNo: "S-NOT-FOUND", password: "AnyPass1!" });
+    },
+    (error) => error instanceof StudentLoginUnauthorizedError
+  );
+
+  await assert.rejects(
+    async () => {
+      await service.loginStudent({ studentNo: "S-EMPTY", password: "AnyPass1!" });
+    },
+    (error) => error instanceof StudentLoginUnauthorizedError
+  );
+
+  assert.equal(comparedHashes.length, 2);
+  assert.equal(comparedHashes[0], comparedHashes[1]);
 });
 
 test("createJwtTokenSigner should sign JWT with expiresInDays", () => {
