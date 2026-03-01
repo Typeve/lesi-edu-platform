@@ -18,26 +18,26 @@ test("drizzle migration metadata chain should be continuous", () => {
   const entries = journal.entries as Array<{ idx: number; tag: string }>;
 
   assert.ok(Array.isArray(entries), "journal entries should be an array");
-  assert.ok(entries.length >= 6, "journal should contain at least 6 entries");
+  assert.ok(entries.length >= 7, "journal should contain at least 7 entries");
 
   entries.forEach((entry, index) => {
     assert.equal(entry.idx, index, `journal idx should be continuous at ${index}`);
   });
 
-  for (const prefix of ["0000", "0001", "0002", "0003", "0004", "0005"]) {
+  for (const prefix of ["0000", "0001", "0002", "0003", "0004", "0005", "0006"]) {
     assert.ok(
       entries.some((entry) => entry.tag.startsWith(`${prefix}_`)),
       `journal should include migration ${prefix}`
     );
   }
 
-  const snapshot0004 = readJson(path.join(drizzleMetaDir, "0004_snapshot.json"));
   const snapshot0005 = readJson(path.join(drizzleMetaDir, "0005_snapshot.json"));
+  const snapshot0006 = readJson(path.join(drizzleMetaDir, "0006_snapshot.json"));
 
   assert.equal(
-    snapshot0005.prevId,
-    snapshot0004.id,
-    "0005 snapshot prevId should point to 0004 snapshot id"
+    snapshot0006.prevId,
+    snapshot0005.id,
+    "0006 snapshot prevId should point to 0005 snapshot id"
   );
 });
 
@@ -116,4 +116,17 @@ test("0005 migration file should exist and include certificate_files table", () 
     /CREATE TABLE\s+`certificate_files`/i,
     "0005 migration should create table certificate_files"
   );
+});
+
+test("0006 migration file should include major dimension and report direction updates", () => {
+  const migrationFiles = fs.readdirSync(drizzleDir);
+  const migration0006 = migrationFiles.find((fileName) => /^0006_.*\.sql$/.test(fileName));
+
+  assert.ok(migration0006, "expected a 0006 migration SQL file");
+
+  const migrationSql = fs.readFileSync(path.join(drizzleDir, migration0006), "utf8");
+
+  assert.match(migrationSql, /CREATE TABLE\s+`majors`/i);
+  assert.match(migrationSql, /ADD\s+`major_id`\s+int/i);
+  assert.match(migrationSql, /ADD\s+`direction`/i);
 });

@@ -30,8 +30,8 @@ export const colleges = mysqlTable(
   })
 );
 
-export const classes = mysqlTable(
-  "classes",
+export const majors = mysqlTable(
+  "majors",
   {
     id: int("id").autoincrement().primaryKey(),
     collegeId: int("college_id")
@@ -41,7 +41,25 @@ export const classes = mysqlTable(
     createdAt: timestamp("created_at").defaultNow().notNull()
   },
   (table) => ({
-    collegeNameUnique: uniqueIndex("classes_college_id_name_unique").on(table.collegeId, table.name)
+    collegeNameUnique: uniqueIndex("majors_college_id_name_unique").on(table.collegeId, table.name),
+    collegeIdIdx: index("majors_college_id_idx").on(table.collegeId)
+  })
+);
+
+export const classes = mysqlTable(
+  "classes",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    collegeId: int("college_id")
+      .notNull()
+      .references(() => colleges.id),
+    majorId: int("major_id").references(() => majors.id),
+    name: varchar("name", { length: 128 }).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull()
+  },
+  (table) => ({
+    collegeNameUnique: uniqueIndex("classes_college_id_name_unique").on(table.collegeId, table.name),
+    majorIdIdx: index("classes_major_id_idx").on(table.majorId)
   })
 );
 
@@ -72,10 +90,14 @@ export const reports = mysqlTable(
     studentId: int("student_id")
       .notNull()
       .references(() => students.id),
+    direction: mysqlEnum("direction", ["employment", "postgraduate", "civil_service"])
+      .notNull()
+      .default("employment"),
     createdAt: timestamp("created_at").defaultNow().notNull()
   },
   (table) => ({
-    studentIdIdx: index("reports_student_id_idx").on(table.studentId)
+    studentIdIdx: index("reports_student_id_idx").on(table.studentId),
+    directionIdx: index("reports_direction_idx").on(table.direction)
   })
 );
 

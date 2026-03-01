@@ -43,6 +43,13 @@
       "when": 1772377359808,
       "tag": "0005_flashy_unus",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1772382173336,
+      "tag": "0006_warm_lester",
+      "breakpoints": true
     }
   ]
 }
