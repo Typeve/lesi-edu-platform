@@ -1,11 +1,13 @@
 import { serve } from "@hono/node-server";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
+import path from "node:path";
 import { env } from "./config/env.js";
 import { db } from "./db/client.js";
 import {
   activities,
   auditLogs,
+  certificateFiles,
   certificates,
   profiles,
   reports,
@@ -23,10 +25,12 @@ import { createResourceAuthorizationService, type ResourceType } from "./modules
 import { bcryptPasswordHasher, bcryptPasswordVerifier } from "./modules/auth/password.js";
 import { createStudentAuthService } from "./modules/auth/service.js";
 import { createJwtTokenSigner, createJwtTokenVerifier } from "./modules/auth/token.js";
+import { createCertificateUploadService } from "./modules/upload/certificate-upload.js";
 import { createAdminRoutes } from "./routes/admin.js";
 import { createAuthRoutes } from "./routes/auth.js";
 import healthRoutes from "./routes/health.js";
 import { createResourcesRoutes } from "./routes/resources.js";
+import { createStudentRoutes } from "./routes/student.js";
 
 const studentRepo = {
   async findStudentByNo(studentNo: string) {
@@ -264,6 +268,41 @@ const auditLogService = createAuditLogService({
   auditLogRepo
 });
 
+const certificateFileRepo = {
+  async createCertificateFile({
+    fileId,
+    studentId,
+    originalName,
+    mimeType,
+    sizeBytes,
+    storagePath,
+    createdAt
+  }: {
+    fileId: string;
+    studentId: number;
+    originalName: string;
+    mimeType: string;
+    sizeBytes: number;
+    storagePath: string;
+    createdAt: Date;
+  }): Promise<void> {
+    await db.insert(certificateFiles).values({
+      fileId,
+      studentId,
+      originalName,
+      mimeType,
+      sizeBytes,
+      storagePath,
+      createdAt
+    });
+  }
+};
+
+const certificateUploadService = createCertificateUploadService({
+  certificateFileRepo,
+  uploadDir: path.resolve(process.cwd(), "uploads/certificates")
+});
+
 const createResourceAuthorization = (resourceType: ResourceType) =>
   createResourceAuthorizationMiddleware({
     resourceType,
@@ -292,6 +331,7 @@ app.route(
   })
 );
 app.route("/resources", createResourcesRoutes({ createResourceAuthorization }));
+app.route("/student", createStudentRoutes({ requireStudentAuth, certificateUploadService }));
 
 serve(
   {

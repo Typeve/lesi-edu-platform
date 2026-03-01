@@ -107,6 +107,27 @@ export const certificates = mysqlTable(
   })
 );
 
+export const certificateFiles = mysqlTable(
+  "certificate_files",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    fileId: varchar("file_id", { length: 64 }).notNull(),
+    studentId: int("student_id")
+      .notNull()
+      .references(() => students.id),
+    originalName: varchar("original_name", { length: 255 }).notNull(),
+    mimeType: varchar("mime_type", { length: 128 }).notNull(),
+    sizeBytes: int("size_bytes").notNull(),
+    storagePath: varchar("storage_path", { length: 255 }).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull()
+  },
+  (table) => ({
+    fileIdUnique: uniqueIndex("certificate_files_file_id_unique").on(table.fileId),
+    studentIdIdx: index("certificate_files_student_id_idx").on(table.studentId),
+    createdAtIdx: index("certificate_files_created_at_idx").on(table.createdAt)
+  })
+);
+
 export const profiles = mysqlTable(
   "profiles",
   {
