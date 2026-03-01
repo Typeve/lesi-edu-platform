@@ -4,6 +4,7 @@ import {
   activities,
   authScopes,
   auditLogs,
+  certificateFiles,
   certificates,
   profiles,
   reports,
@@ -67,4 +68,14 @@ test("schema should include activity and audit log tables", () => {
   assert.equal(auditLogs.action.name, "action");
   assert.equal(auditLogs.target.name, "target");
   assert.equal(auditLogs.createdAt.name, "created_at");
+});
+
+test("schema should include certificate_files metadata table", () => {
+  assert.equal(certificateFiles[Symbol.for("drizzle:Name")], "certificate_files");
+  assert.equal(certificateFiles.fileId.name, "file_id");
+  assert.equal(certificateFiles.studentId.name, "student_id");
+  assert.equal(certificateFiles.originalName.name, "original_name");
+  assert.equal(certificateFiles.mimeType.name, "mime_type");
+  assert.equal(certificateFiles.sizeBytes.name, "size_bytes");
+  assert.equal(certificateFiles.storagePath.name, "storage_path");
 });
