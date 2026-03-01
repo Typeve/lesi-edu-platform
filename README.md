@@ -36,10 +36,20 @@ npm run dev
 ```bash
 npm run check
 npm run build
+npm test
 npm run db:generate
 npm run db:migrate
 npm run db:studio
 ```
+
+## 当前数据模型（B01）
+
+- 组织层级：`schools` / `colleges` / `classes` / `students`
+- 角色：`roles`（student/teacher/admin）
+- 授权范围：`auth_scopes`（school/college/class/student）
+- 角色范围关联：`role_scopes`
+
+支持通过 `class_id` / `student_id` 表达授权范围。
 
 ## 健康检查
 
