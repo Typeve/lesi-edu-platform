@@ -5,7 +5,10 @@ import {
   authScopes,
   auditLogs,
   certificateFiles,
+  classes,
   certificates,
+  colleges,
+  majors,
   profiles,
   reports,
   roleScopes,
@@ -78,4 +81,11 @@ test("schema should include certificate_files metadata table", () => {
   assert.equal(certificateFiles.mimeType.name, "mime_type");
   assert.equal(certificateFiles.sizeBytes.name, "size_bytes");
   assert.equal(certificateFiles.storagePath.name, "storage_path");
+});
+
+test("schema should include major dimension and report direction fields", () => {
+  assert.equal(majors[Symbol.for("drizzle:Name")], "majors");
+  assert.equal(classes.majorId.name, "major_id");
+  assert.equal(colleges.schoolId.name, "school_id");
+  assert.equal(reports.direction.name, "direction");
 });

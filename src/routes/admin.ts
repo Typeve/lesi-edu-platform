@@ -3,6 +3,11 @@ import type { ActivityService, ActivityType } from "../modules/activity/service.
 import type { AuditLogService } from "../modules/audit/service.js";
 import type { AuthorizationGrantService, GrantType } from "../modules/authorization/grant-service.js";
 import {
+  type DashboardDimension,
+  type DashboardDimensionAggregationService,
+  type DashboardFilters
+} from "../modules/metrics/aggregation.js";
+import {
   MissingImportFileError,
   UnsupportedExcelFileTypeError,
   type ExcelImportValidationService,
@@ -39,6 +44,10 @@ export interface AdminRouteDependencies {
     "logAuthorizationGrant" | "logAuthorizationRevoke" | "logPasswordReset" | "logActivityPublish"
   >;
   excelImportValidationService?: Pick<ExcelImportValidationService, "validateExcelImport">;
+  dashboardDimensionAggregationService?: Pick<
+    DashboardDimensionAggregationService,
+    "aggregateByDimension"
+  >;
   adminApiKey: string;
 }
 
@@ -109,6 +118,23 @@ const isForbiddenByAdminKey = (requestAdminKey: string | undefined, adminApiKey:
   return !requestAdminKey || requestAdminKey !== adminApiKey;
 };
 
+const isDashboardDimension = (dimension: unknown): dimension is DashboardDimension => {
+  return dimension === "college" || dimension === "major" || dimension === "class";
+};
+
+const parsePositiveIntegerQuery = (raw: string | undefined): number | undefined | null => {
+  if (raw === undefined) {
+    return undefined;
+  }
+
+  if (!/^[1-9]\d*$/.test(raw)) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+};
+
 const isImportDatasetType = (datasetType: unknown): datasetType is ImportDatasetType => {
   return datasetType === "enrollment" || datasetType === "employment";
 };
@@ -166,12 +192,22 @@ const defaultExcelImportValidationService: Pick<ExcelImportValidationService, "v
   }
 };
 
+const defaultDashboardDimensionAggregationService: Pick<
+  DashboardDimensionAggregationService,
+  "aggregateByDimension"
+> = {
+  async aggregateByDimension() {
+    throw new Error("dashboardDimensionAggregationService is not configured");
+  }
+};
+
 export const createAdminRoutes = ({
   studentAuthService,
   authorizationGrantService,
   activityService,
   auditLogService,
   excelImportValidationService = defaultExcelImportValidationService,
+  dashboardDimensionAggregationService = defaultDashboardDimensionAggregationService,
   adminApiKey
 }: AdminRouteDependencies) => {
   const admin = new Hono();
@@ -367,6 +403,41 @@ export const createAdminRoutes = ({
 
       throw error;
     }
+  });
+
+  admin.get("/dashboard/dimension-aggregation", async (c) => {
+    const requestAdminKey = c.req.header("x-admin-key");
+    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
+      return c.json({ message: "forbidden" }, 403);
+    }
+
+    const dimensionQuery = c.req.query("dimension");
+    if (!isDashboardDimension(dimensionQuery)) {
+      return c.json({ message: "dimension must be college/major/class" }, 400);
+    }
+
+    const schoolId = parsePositiveIntegerQuery(c.req.query("schoolId"));
+    const collegeId = parsePositiveIntegerQuery(c.req.query("collegeId"));
+    const majorId = parsePositiveIntegerQuery(c.req.query("majorId"));
+    const classId = parsePositiveIntegerQuery(c.req.query("classId"));
+
+    if ([schoolId, collegeId, majorId, classId].some((value) => value === null)) {
+      return c.json({ message: "organization filter must be positive integer" }, 400);
+    }
+
+    const filters: DashboardFilters = {
+      schoolId: schoolId as number | undefined,
+      collegeId: collegeId as number | undefined,
+      majorId: majorId as number | undefined,
+      classId: classId as number | undefined
+    };
+
+    const result = await dashboardDimensionAggregationService.aggregateByDimension({
+      dimension: dimensionQuery,
+      filters
+    });
+
+    return c.json(result, 200);
   });
 
   return admin;

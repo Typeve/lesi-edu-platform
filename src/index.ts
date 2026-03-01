@@ -8,7 +8,10 @@ import {
   activities,
   auditLogs,
   certificateFiles,
+  classes,
   certificates,
+  colleges,
+  majors,
   profiles,
   reports,
   students,
@@ -21,6 +24,7 @@ import { createResourceAuthorizationMiddleware } from "./middleware/resource-aut
 import { createActivityService } from "./modules/activity/service.js";
 import { createAuditLogService } from "./modules/audit/service.js";
 import { createAuthorizationGrantService } from "./modules/authorization/grant-service.js";
+import { createDashboardDimensionAggregationService } from "./modules/metrics/aggregation.js";
 import { createResourceAuthorizationService, type ResourceType } from "./modules/authorization/service.js";
 import { bcryptPasswordHasher, bcryptPasswordVerifier } from "./modules/auth/password.js";
 import { createStudentAuthService } from "./modules/auth/service.js";
@@ -271,6 +275,133 @@ const auditLogService = createAuditLogService({
 
 const excelImportValidationService = createExcelImportValidationService();
 
+const dashboardMetricsRepo = {
+  async listClassMetricRecords(filters: {
+    schoolId?: number;
+    collegeId?: number;
+    majorId?: number;
+    classId?: number;
+  }) {
+    const conditions = [];
+
+    if (filters.schoolId) {
+      conditions.push(eq(colleges.schoolId, filters.schoolId));
+    }
+    if (filters.collegeId) {
+      conditions.push(eq(classes.collegeId, filters.collegeId));
+    }
+    if (filters.majorId) {
+      conditions.push(eq(classes.majorId, filters.majorId));
+    }
+    if (filters.classId) {
+      conditions.push(eq(classes.id, filters.classId));
+    }
+
+    const baseQuery = db
+      .select({
+        schoolId: colleges.schoolId,
+        collegeId: colleges.id,
+        collegeName: colleges.name,
+        majorId: majors.id,
+        majorName: majors.name,
+        classId: classes.id,
+        className: classes.name
+      })
+      .from(classes)
+      .innerJoin(colleges, eq(classes.collegeId, colleges.id))
+      .leftJoin(majors, eq(classes.majorId, majors.id));
+
+    const classRows =
+      conditions.length > 0 ? await baseQuery.where(and(...conditions)) : await baseQuery;
+
+    const records: Array<{
+      schoolId: number;
+      collegeId: number;
+      collegeName: string;
+      majorId: number | null;
+      majorName: string | null;
+      classId: number;
+      className: string;
+      activatedStudentsCount: number;
+      assessmentCompletedStudentsCount: number;
+      reportGeneratedStudentsCount: number;
+      studentsWithAssignedTasksCount: number;
+      studentsWithCompletedTaskCount: number;
+      studentsEligibleForActivitiesCount: number;
+      studentsParticipatedActivitiesCount: number;
+      reportDirectionEmploymentCount: number;
+      reportDirectionPostgraduateCount: number;
+      reportDirectionCivilServiceCount: number;
+    }> = [];
+
+    for (const classRow of classRows) {
+      const studentsInClass = await db
+        .select({ id: students.id })
+        .from(students)
+        .where(eq(students.classId, classRow.classId));
+
+      const activatedStudentsCount = studentsInClass.length;
+
+      const profileRows = await db
+        .select({ studentId: profiles.studentId })
+        .from(profiles)
+        .innerJoin(students, eq(profiles.studentId, students.id))
+        .where(eq(students.classId, classRow.classId));
+      const assessmentCompletedStudentsCount = new Set(profileRows.map((row) => row.studentId)).size;
+
+      const reportRows = await db
+        .select({ studentId: reports.studentId, direction: reports.direction })
+        .from(reports)
+        .innerJoin(students, eq(reports.studentId, students.id))
+        .where(eq(students.classId, classRow.classId));
+      const reportGeneratedStudentsCount = new Set(reportRows.map((row) => row.studentId)).size;
+
+      const taskRows = await db
+        .select({ studentId: tasks.studentId })
+        .from(tasks)
+        .innerJoin(students, eq(tasks.studentId, students.id))
+        .where(eq(students.classId, classRow.classId));
+      const studentsWithAssignedTasksCount = new Set(taskRows.map((row) => row.studentId)).size;
+      const studentsWithCompletedTaskCount = studentsWithAssignedTasksCount;
+
+      const certificateRows = await db
+        .select({ studentId: certificates.studentId })
+        .from(certificates)
+        .innerJoin(students, eq(certificates.studentId, students.id))
+        .where(eq(students.classId, classRow.classId));
+      const studentsParticipatedActivitiesCount = new Set(
+        certificateRows.map((row) => row.studentId)
+      ).size;
+
+      records.push({
+        schoolId: classRow.schoolId,
+        collegeId: classRow.collegeId,
+        collegeName: classRow.collegeName,
+        majorId: classRow.majorId,
+        majorName: classRow.majorName,
+        classId: classRow.classId,
+        className: classRow.className,
+        activatedStudentsCount,
+        assessmentCompletedStudentsCount,
+        reportGeneratedStudentsCount,
+        studentsWithAssignedTasksCount,
+        studentsWithCompletedTaskCount,
+        studentsEligibleForActivitiesCount: activatedStudentsCount,
+        studentsParticipatedActivitiesCount,
+        reportDirectionEmploymentCount: reportRows.filter((row) => row.direction === "employment").length,
+        reportDirectionPostgraduateCount: reportRows.filter((row) => row.direction === "postgraduate").length,
+        reportDirectionCivilServiceCount: reportRows.filter((row) => row.direction === "civil_service").length
+      });
+    }
+
+    return records;
+  }
+};
+
+const dashboardDimensionAggregationService = createDashboardDimensionAggregationService({
+  dashboardMetricsRepo
+});
+
 const certificateFileRepo = {
   async createCertificateFile({
     fileId,
@@ -331,6 +462,7 @@ app.route(
     activityService,
     auditLogService,
     excelImportValidationService,
+    dashboardDimensionAggregationService,
     adminApiKey: env.ADMIN_API_KEY
   })
 );
