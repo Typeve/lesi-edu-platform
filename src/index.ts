@@ -1,6 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { env } from "./config/env.js";
+import { createAuthRoutes } from "./routes/auth.js";
 import healthRoutes from "./routes/health.js";
 
 const app = new Hono();
@@ -13,6 +14,7 @@ app.get("/", (c) =>
 );
 
 app.route("/", healthRoutes);
+app.route("/auth", createAuthRoutes());
 
 serve(
   {
@@ -23,4 +25,3 @@ serve(
     console.log(`API listening on http://localhost:${info.port}`);
   }
 );
-
