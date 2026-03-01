@@ -21,19 +21,20 @@ export interface CreateStudentAuthMiddlewareInput {
 }
 
 const DEFAULT_CHANGE_PASSWORD_PATH = "/auth/student/change-password";
+const BEARER_TOKEN_PATTERN = /^bearer\s+(\S+)\s*$/i;
 
 const parseBearerToken = (authorizationHeader: string | undefined): string | null => {
   if (!authorizationHeader) {
     return null;
   }
 
-  const [scheme, token] = authorizationHeader.split(" ");
+  const matched = authorizationHeader.trim().match(BEARER_TOKEN_PATTERN);
 
-  if (scheme !== "Bearer" || !token) {
+  if (!matched) {
     return null;
   }
 
-  return token;
+  return matched[1];
 };
 
 export const createStudentAuthMiddleware = ({

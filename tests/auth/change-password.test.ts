@@ -101,6 +101,52 @@ function signStudentToken(ctx: TestContext): string {
   });
 }
 
+test("POST /auth/student/change-password should return 401 when Authorization header is missing", async () => {
+  const ctx = await buildStudentContext();
+  const app = buildApp(ctx);
+
+  const response = await app.request(changePasswordPath, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      oldPassword: "OldPass1!",
+      newPassword: "NewPass2@"
+    })
+  });
+
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), {
+    message: "unauthorized"
+  });
+
+  assert.equal(ctx.updateCount, 0);
+});
+
+test("POST /auth/student/change-password should accept case-insensitive Bearer scheme with multiple spaces", async () => {
+  const ctx = await buildStudentContext();
+  const app = buildApp(ctx);
+
+  const response = await app.request(changePasswordPath, {
+    method: "POST",
+    headers: {
+      authorization: `bEaReR    ${signStudentToken(ctx)}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      oldPassword: "OldPass1!",
+      newPassword: "NewPass2@"
+    })
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    message: "password changed"
+  });
+  assert.equal(ctx.updateCount, 1);
+});
+
 test("POST /auth/student/change-password should change password when old password is correct", async () => {
   const ctx = await buildStudentContext();
   const app = buildApp(ctx);
