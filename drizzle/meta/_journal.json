@@ -8,6 +8,13 @@
       "when": 1772364544884,
       "tag": "0000_giant_tomas",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1772367988416,
+      "tag": "0001_classy_jubilee",
+      "breakpoints": true
     }
   ]
 }
