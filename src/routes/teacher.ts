@@ -4,9 +4,15 @@ import type {
   ReportStatusFilter,
   TeacherMyStudentsService
 } from "../modules/teacher/my-students.js";
+import {
+  TeacherStudentDetailForbiddenError,
+  TeacherStudentDetailNotFoundError,
+  type TeacherStudentDetailService
+} from "../modules/teacher/student-detail.js";
 
 export interface TeacherRouteDependencies {
   teacherMyStudentsService: Pick<TeacherMyStudentsService, "getMyStudents">;
+  teacherStudentDetailService?: Pick<TeacherStudentDetailService, "getStudentDetail">;
 }
 
 const parsePositiveInteger = (raw: string | undefined): number | undefined => {
@@ -33,7 +39,14 @@ const parseReportStatus = (raw: string | undefined): ReportStatusFilter | undefi
   return undefined;
 };
 
-export const createTeacherRoutes = ({ teacherMyStudentsService }: TeacherRouteDependencies) => {
+export const createTeacherRoutes = ({
+  teacherMyStudentsService,
+  teacherStudentDetailService = {
+    async getStudentDetail() {
+      throw new Error("teacherStudentDetailService is not configured");
+    }
+  }
+}: TeacherRouteDependencies) => {
   const teacher = new Hono();
 
   teacher.get("/my-students", async (c) => {
@@ -59,6 +72,34 @@ export const createTeacherRoutes = ({ teacherMyStudentsService }: TeacherRouteDe
     });
 
     return c.json(result, 200);
+  });
+
+  teacher.get("/students/:id/detail", async (c) => {
+    const teacherId = c.req.header("x-teacher-id")?.trim();
+    if (!teacherId) {
+      return c.json({ message: "teacher id required" }, 401);
+    }
+
+    const studentId = Number.parseInt(c.req.param("id"), 10);
+    if (!Number.isInteger(studentId) || studentId <= 0) {
+      return c.json({ message: "invalid student id" }, 400);
+    }
+
+    try {
+      const result = await teacherStudentDetailService.getStudentDetail({
+        teacherId,
+        studentId
+      });
+      return c.json(result, 200);
+    } catch (error) {
+      if (error instanceof TeacherStudentDetailForbiddenError) {
+        return c.json({ message: "forbidden" }, 403);
+      }
+      if (error instanceof TeacherStudentDetailNotFoundError) {
+        return c.json({ message: "student not found" }, 404);
+      }
+      throw error;
+    }
   });
 
   return teacher;
