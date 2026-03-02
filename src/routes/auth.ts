@@ -10,6 +10,7 @@ import {
   StudentFirstLoginVerificationNotFoundError,
   type StudentFirstLoginVerificationService
 } from "../modules/auth/first-login-verification.js";
+import type { EnrollmentProfileService } from "../modules/enrollment/profile.js";
 
 interface StudentLoginRequestBody {
   studentNo: string;
@@ -34,6 +35,7 @@ export interface AuthRouteDependencies {
     StudentFirstLoginVerificationService,
     "verifyStudentFirstLogin"
   >;
+  enrollmentProfileService?: Pick<EnrollmentProfileService, "getEnrollmentProfile">;
   requireStudentAuth?: MiddlewareHandler;
 }
 
@@ -106,9 +108,16 @@ const defaultStudentFirstLoginVerificationService: Pick<
   }
 };
 
+const defaultEnrollmentProfileService: Pick<EnrollmentProfileService, "getEnrollmentProfile"> = {
+  async getEnrollmentProfile() {
+    throw new Error("enrollmentProfileService is not configured");
+  }
+};
+
 export const createAuthRoutes = ({
   studentAuthService,
   studentFirstLoginVerificationService = defaultStudentFirstLoginVerificationService,
+  enrollmentProfileService = defaultEnrollmentProfileService,
   requireStudentAuth = passThroughAuthMiddleware
 }: AuthRouteDependencies) => {
   const auth = new Hono();
@@ -225,6 +234,20 @@ export const createAuthRoutes = ({
 
       throw error;
     }
+  });
+
+  auth.get("/student/enrollment-profile", requireStudentAuth, async (c) => {
+    const studentAuth = c.get("studentAuth");
+
+    if (!studentAuth) {
+      return c.json({ message: "unauthorized" }, 401);
+    }
+
+    const result = await enrollmentProfileService.getEnrollmentProfile({
+      studentNo: studentAuth.studentNo
+    });
+
+    return c.json(result, 200);
   });
 
   return auth;

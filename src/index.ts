@@ -11,6 +11,7 @@ import {
   classes,
   certificates,
   colleges,
+  enrollmentProfiles,
   majors,
   profiles,
   reports,
@@ -43,6 +44,7 @@ import { bcryptPasswordHasher, bcryptPasswordVerifier } from "./modules/auth/pas
 import { createStudentAuthService } from "./modules/auth/service.js";
 import { createJwtTokenSigner, createJwtTokenVerifier } from "./modules/auth/token.js";
 import { createStudentFirstLoginVerificationService } from "./modules/auth/first-login-verification.js";
+import { createEnrollmentProfileService } from "./modules/enrollment/profile.js";
 import { createExcelImportValidationService } from "./modules/import/excel-validation.js";
 import { createCertificateUploadService } from "./modules/upload/certificate-upload.js";
 import { createAdminRoutes } from "./routes/admin.js";
@@ -143,6 +145,29 @@ const studentFirstLoginVerificationRepo = {
 
 const studentFirstLoginVerificationService = createStudentFirstLoginVerificationService({
   studentFirstLoginVerificationRepo: studentFirstLoginVerificationRepo
+});
+
+const enrollmentProfileRepo = {
+  async findEnrollmentProfileByStudentNo(studentNo: string) {
+    const records = await db
+      .select({
+        studentNo: enrollmentProfiles.studentNo,
+        name: enrollmentProfiles.name,
+        schoolName: enrollmentProfiles.schoolName,
+        majorName: enrollmentProfiles.majorName,
+        score: enrollmentProfiles.score,
+        admissionYear: enrollmentProfiles.admissionYear
+      })
+      .from(enrollmentProfiles)
+      .where(eq(enrollmentProfiles.studentNo, studentNo))
+      .limit(1);
+
+    return records[0] ?? null;
+  }
+};
+
+const enrollmentProfileService = createEnrollmentProfileService({
+  enrollmentProfileRepo
 });
 
 const requireStudentAuth = createStudentAuthMiddleware({
@@ -723,6 +748,7 @@ app.route(
   createAuthRoutes({
     studentAuthService,
     studentFirstLoginVerificationService,
+    enrollmentProfileService,
     requireStudentAuth
   })
 );

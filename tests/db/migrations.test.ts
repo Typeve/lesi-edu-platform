@@ -18,13 +18,13 @@ test("drizzle migration metadata chain should be continuous", () => {
   const entries = journal.entries as Array<{ idx: number; tag: string }>;
 
   assert.ok(Array.isArray(entries), "journal entries should be an array");
-  assert.ok(entries.length >= 7, "journal should contain at least 7 entries");
+  assert.ok(entries.length >= 8, "journal should contain at least 8 entries");
 
   entries.forEach((entry, index) => {
     assert.equal(entry.idx, index, `journal idx should be continuous at ${index}`);
   });
 
-  for (const prefix of ["0000", "0001", "0002", "0003", "0004", "0005", "0006"]) {
+  for (const prefix of ["0000", "0001", "0002", "0003", "0004", "0005", "0006", "0007"]) {
     assert.ok(
       entries.some((entry) => entry.tag.startsWith(`${prefix}_`)),
       `journal should include migration ${prefix}`
@@ -141,4 +141,18 @@ test("0007 migration file should include student first-login verification fields
 
   assert.match(migrationSql, /ADD\s+`credential_no`\s+varchar\(32\)/i);
   assert.match(migrationSql, /ADD\s+`first_login_verified_at`\s+timestamp/i);
+});
+
+test("0008 migration file should include enrollment_profiles source table", () => {
+  const migrationFiles = fs.readdirSync(drizzleDir);
+  const migration0008 = migrationFiles.find((fileName) => /^0008_.*\.sql$/.test(fileName));
+
+  assert.ok(migration0008, "expected a 0008 migration SQL file");
+
+  const migrationSql = fs.readFileSync(path.join(drizzleDir, migration0008), "utf8");
+
+  assert.match(migrationSql, /CREATE TABLE\s+`enrollment_profiles`/i);
+  assert.match(migrationSql, /`student_no`\s+varchar\(32\)\s+NOT\s+NULL/i);
+  assert.match(migrationSql, /`score`\s+int/i);
+  assert.match(migrationSql, /`admission_year`\s+int/i);
 });

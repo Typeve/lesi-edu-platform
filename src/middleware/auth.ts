@@ -19,10 +19,12 @@ export interface CreateStudentAuthMiddlewareInput {
   studentRepo: Pick<StudentAuthRepository, "findStudentById">;
   changePasswordPath?: string;
   firstLoginVerifyPath?: string;
+  enrollmentProfilePath?: string;
 }
 
 const DEFAULT_CHANGE_PASSWORD_PATH = "/auth/student/change-password";
 const DEFAULT_FIRST_LOGIN_VERIFY_PATH = "/auth/student/first-login-verify";
+const DEFAULT_ENROLLMENT_PROFILE_PATH = "/auth/student/enrollment-profile";
 const BEARER_TOKEN_PATTERN = /^bearer\s+(\S+)\s*$/i;
 
 const parseBearerToken = (authorizationHeader: string | undefined): string | null => {
@@ -43,7 +45,8 @@ export const createStudentAuthMiddleware = ({
   tokenVerifier,
   studentRepo,
   changePasswordPath = DEFAULT_CHANGE_PASSWORD_PATH,
-  firstLoginVerifyPath = DEFAULT_FIRST_LOGIN_VERIFY_PATH
+  firstLoginVerifyPath = DEFAULT_FIRST_LOGIN_VERIFY_PATH,
+  enrollmentProfilePath = DEFAULT_ENROLLMENT_PROFILE_PATH
 }: CreateStudentAuthMiddlewareInput): MiddlewareHandler => {
   return async (c, next) => {
     const token = parseBearerToken(c.req.header("authorization"));
@@ -77,7 +80,8 @@ export const createStudentAuthMiddleware = ({
     if (
       student.firstLoginVerifiedAt === null &&
       c.req.path !== changePasswordPath &&
-      c.req.path !== firstLoginVerifyPath
+      c.req.path !== firstLoginVerifyPath &&
+      c.req.path !== enrollmentProfilePath
     ) {
       return c.json({ message: "first login verification required" }, 403);
     }

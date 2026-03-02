@@ -8,6 +8,7 @@ import {
   classes,
   certificates,
   colleges,
+  enrollmentProfiles,
   majors,
   profiles,
   reports,
@@ -90,4 +91,11 @@ test("schema should include major dimension and report direction fields", () => 
   assert.equal(classes.majorId.name, "major_id");
   assert.equal(colleges.schoolId.name, "school_id");
   assert.equal(reports.direction.name, "direction");
+});
+
+test("schema should include enrollment_profiles read-only source table", () => {
+  assert.equal(enrollmentProfiles[Symbol.for("drizzle:Name")], "enrollment_profiles");
+  assert.equal(enrollmentProfiles.studentNo.name, "student_no");
+  assert.equal(enrollmentProfiles.score.name, "score");
+  assert.equal(enrollmentProfiles.admissionYear.name, "admission_year");
 });
