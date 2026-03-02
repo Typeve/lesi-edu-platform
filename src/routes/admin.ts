@@ -59,6 +59,12 @@ interface AdminTeacherStatusBody {
   status: "active" | "frozen";
 }
 
+interface AdminStudentArchiveCreateBody {
+  classId: number;
+  studentNo: string;
+  name: string;
+}
+
 export interface AdminRouteDependencies {
   studentAuthService: Pick<StudentAuthService, "resetStudentPasswordByAdmin">;
   authorizationGrantService: Pick<AuthorizationGrantService, "assignGrant" | "revokeGrant">;
@@ -87,6 +93,21 @@ export interface AdminRouteDependencies {
     }): Promise<{ teacherId: string }>;
     updateTeacherStatus(input: { teacherId: string; status: "active" | "frozen" }): Promise<void>;
     resetTeacherPassword(input: { teacherId: string; newPassword: string }): Promise<void>;
+  };
+  adminStudentArchiveService?: {
+    createStudentArchive(input: { classId: number; studentNo: string; name: string }): Promise<{ studentId: number }>;
+    getStudentArchive(input: { studentId: number }): Promise<{
+      studentId: number;
+      studentNo: string;
+      name: string;
+      classId: number;
+    } | null>;
+    updateStudentArchive(input: { studentId: number; name?: string; classId?: number }): Promise<void>;
+    deleteStudentArchive(input: { studentId: number }): Promise<void>;
+    getEnrollmentLinkStatus(input: { studentId: number }): Promise<{
+      status: "linked" | "missing" | "duplicate" | "abnormal";
+      reason: string | null;
+    }>;
   };
   adminApiKey: string;
 }
@@ -291,6 +312,24 @@ const defaultTeacherAccountService: NonNullable<AdminRouteDependencies["teacherA
   }
 };
 
+const defaultAdminStudentArchiveService: NonNullable<AdminRouteDependencies["adminStudentArchiveService"]> = {
+  async createStudentArchive() {
+    throw new Error("adminStudentArchiveService is not configured");
+  },
+  async getStudentArchive() {
+    throw new Error("adminStudentArchiveService is not configured");
+  },
+  async updateStudentArchive() {
+    throw new Error("adminStudentArchiveService is not configured");
+  },
+  async deleteStudentArchive() {
+    throw new Error("adminStudentArchiveService is not configured");
+  },
+  async getEnrollmentLinkStatus() {
+    throw new Error("adminStudentArchiveService is not configured");
+  }
+};
+
 export const createAdminRoutes = ({
   studentAuthService,
   authorizationGrantService,
@@ -301,6 +340,7 @@ export const createAdminRoutes = ({
   dashboardTrendFunnelService = defaultDashboardTrendFunnelService,
   adminOrgService = defaultAdminOrgService,
   teacherAccountService = defaultTeacherAccountService,
+  adminStudentArchiveService = defaultAdminStudentArchiveService,
   adminApiKey
 }: AdminRouteDependencies) => {
   const admin = new Hono();
@@ -477,6 +517,93 @@ export const createAdminRoutes = ({
       targetStudentId: 0
     });
     return c.json({ message: "ok" }, 200);
+  });
+
+  admin.post("/students", async (c) => {
+    const requestAdminKey = c.req.header("x-admin-key");
+    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
+      return c.json({ message: "forbidden" }, 403);
+    }
+    const body = (await c.req.json().catch(() => null)) as AdminStudentArchiveCreateBody | null;
+    if (
+      !body ||
+      !Number.isInteger(body.classId) ||
+      body.classId <= 0 ||
+      !body.studentNo?.trim() ||
+      !body.name?.trim()
+    ) {
+      return c.json({ message: "invalid request body" }, 400);
+    }
+
+    const result = await adminStudentArchiveService.createStudentArchive({
+      classId: body.classId,
+      studentNo: body.studentNo.trim(),
+      name: body.name.trim()
+    });
+    return c.json(result, 200);
+  });
+
+  admin.get("/students/:id", async (c) => {
+    const requestAdminKey = c.req.header("x-admin-key");
+    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
+      return c.json({ message: "forbidden" }, 403);
+    }
+    const studentId = parsePositiveInteger(c.req.param("id"));
+    if (!studentId) {
+      return c.json({ message: "invalid student id" }, 400);
+    }
+    const result = await adminStudentArchiveService.getStudentArchive({ studentId });
+    if (!result) {
+      return c.json({ message: "student not found" }, 404);
+    }
+    return c.json(result, 200);
+  });
+
+  admin.patch("/students/:id", async (c) => {
+    const requestAdminKey = c.req.header("x-admin-key");
+    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
+      return c.json({ message: "forbidden" }, 403);
+    }
+    const studentId = parsePositiveInteger(c.req.param("id"));
+    if (!studentId) {
+      return c.json({ message: "invalid student id" }, 400);
+    }
+    const body = (await c.req.json().catch(() => null)) as { name?: string; classId?: number } | null;
+    if (!body) {
+      return c.json({ message: "invalid request body" }, 400);
+    }
+    await adminStudentArchiveService.updateStudentArchive({
+      studentId,
+      name: typeof body.name === "string" ? body.name.trim() : undefined,
+      classId: Number.isInteger(body.classId) && body.classId > 0 ? body.classId : undefined
+    });
+    return c.json({ message: "ok" }, 200);
+  });
+
+  admin.delete("/students/:id", async (c) => {
+    const requestAdminKey = c.req.header("x-admin-key");
+    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
+      return c.json({ message: "forbidden" }, 403);
+    }
+    const studentId = parsePositiveInteger(c.req.param("id"));
+    if (!studentId) {
+      return c.json({ message: "invalid student id" }, 400);
+    }
+    await adminStudentArchiveService.deleteStudentArchive({ studentId });
+    return c.json({ message: "ok" }, 200);
+  });
+
+  admin.get("/students/:id/enrollment-link", async (c) => {
+    const requestAdminKey = c.req.header("x-admin-key");
+    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
+      return c.json({ message: "forbidden" }, 403);
+    }
+    const studentId = parsePositiveInteger(c.req.param("id"));
+    if (!studentId) {
+      return c.json({ message: "invalid student id" }, 400);
+    }
+    const result = await adminStudentArchiveService.getEnrollmentLinkStatus({ studentId });
+    return c.json(result, 200);
   });
 
   admin.post("/authorizations/grants", async (c) => {
