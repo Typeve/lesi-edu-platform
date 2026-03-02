@@ -5,6 +5,7 @@ import path from "node:path";
 import { env } from "./config/env.js";
 import { db } from "./db/client.js";
 import {
+  assessmentSubmissions,
   activities,
   auditLogs,
   certificateFiles,
@@ -44,6 +45,7 @@ import { bcryptPasswordHasher, bcryptPasswordVerifier } from "./modules/auth/pas
 import { createStudentAuthService } from "./modules/auth/service.js";
 import { createJwtTokenSigner, createJwtTokenVerifier } from "./modules/auth/token.js";
 import { createStudentFirstLoginVerificationService } from "./modules/auth/first-login-verification.js";
+import { createLikertAssessmentService } from "./modules/assessment/likert.js";
 import { createEnrollmentProfileService } from "./modules/enrollment/profile.js";
 import { createExcelImportValidationService } from "./modules/import/excel-validation.js";
 import { createCertificateUploadService } from "./modules/upload/certificate-upload.js";
@@ -168,6 +170,63 @@ const enrollmentProfileRepo = {
 
 const enrollmentProfileService = createEnrollmentProfileService({
   enrollmentProfileRepo
+});
+
+const likertAssessmentSubmissionRepo = {
+  async findSubmissionByStudentId(studentId: number) {
+    const records = await db
+      .select({
+        id: assessmentSubmissions.id,
+        studentId: assessmentSubmissions.studentId,
+        answersJson: assessmentSubmissions.answersJson,
+        answerCount: assessmentSubmissions.answerCount
+      })
+      .from(assessmentSubmissions)
+      .where(eq(assessmentSubmissions.studentId, studentId))
+      .limit(1);
+
+    return records[0] ?? null;
+  },
+  async createSubmission({ studentId, answersJson, answerCount, submittedAt }: {
+    studentId: number;
+    answersJson: string;
+    answerCount: number;
+    submittedAt: Date;
+  }) {
+    const insertResult = await db
+      .insert(assessmentSubmissions)
+      .values({
+        studentId,
+        answersJson,
+        answerCount,
+        questionSetVersion: "v1",
+        submittedAt,
+        updatedAt: submittedAt
+      });
+
+    return Number(insertResult[0].insertId);
+  },
+  async updateSubmission({ id, answersJson, answerCount, submittedAt }: {
+    id: number;
+    studentId: number;
+    answersJson: string;
+    answerCount: number;
+    submittedAt: Date;
+  }) {
+    await db
+      .update(assessmentSubmissions)
+      .set({
+        answersJson,
+        answerCount,
+        submittedAt,
+        updatedAt: submittedAt
+      })
+      .where(eq(assessmentSubmissions.id, id));
+  }
+};
+
+const likertAssessmentService = createLikertAssessmentService({
+  submissionRepo: likertAssessmentSubmissionRepo
 });
 
 const requireStudentAuth = createStudentAuthMiddleware({
@@ -766,7 +825,14 @@ app.route(
   })
 );
 app.route("/resources", createResourcesRoutes({ createResourceAuthorization }));
-app.route("/student", createStudentRoutes({ requireStudentAuth, certificateUploadService }));
+app.route(
+  "/student",
+  createStudentRoutes({
+    requireStudentAuth,
+    certificateUploadService,
+    likertAssessmentService
+  })
+);
 
 serve(
   {

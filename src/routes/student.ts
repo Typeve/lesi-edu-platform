@@ -6,10 +6,15 @@ import {
   type CertificateUploadService,
   type UploadedFile
 } from "../modules/upload/certificate-upload.js";
+import {
+  InvalidLikertAnswersError,
+  type LikertAssessmentService
+} from "../modules/assessment/likert.js";
 
 export interface StudentRouteDependencies {
   requireStudentAuth: MiddlewareHandler;
   certificateUploadService: CertificateUploadService;
+  likertAssessmentService?: Pick<LikertAssessmentService, "getQuestions" | "submitAnswers">;
 }
 
 const isUploadedFile = (value: unknown): value is UploadedFile => {
@@ -44,9 +49,62 @@ const resolveFileFromBody = (body: Record<string, unknown>): UploadedFile | null
 
 export const createStudentRoutes = ({
   requireStudentAuth,
-  certificateUploadService
+  certificateUploadService,
+  likertAssessmentService = {
+    async getQuestions() {
+      throw new Error("likertAssessmentService is not configured");
+    },
+    async submitAnswers() {
+      throw new Error("likertAssessmentService is not configured");
+    }
+  }
 }: StudentRouteDependencies) => {
   const student = new Hono();
+
+  student.get("/assessments/questions", requireStudentAuth, async (c) => {
+    const studentAuth = c.get("studentAuth");
+    if (!studentAuth) {
+      return c.json({ message: "unauthorized" }, 401);
+    }
+
+    const result = await likertAssessmentService.getQuestions();
+    return c.json(result, 200);
+  });
+
+  student.post("/assessments/submissions", requireStudentAuth, async (c) => {
+    const studentAuth = c.get("studentAuth");
+    if (!studentAuth) {
+      return c.json({ message: "unauthorized" }, 401);
+    }
+
+    let body: unknown;
+
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ message: "invalid request body" }, 400);
+    }
+
+    const answers = (body as { answers?: unknown })?.answers;
+    if (!Array.isArray(answers)) {
+      return c.json({ message: "answers must include exactly 50 likert items" }, 400);
+    }
+
+    try {
+      const result = await likertAssessmentService.submitAnswers({
+        studentId: studentAuth.studentId,
+        answers: answers as Array<{ questionId: number; score: number }>
+      });
+
+      return c.json(result, 200);
+    } catch (error) {
+      if (error instanceof InvalidLikertAnswersError) {
+        return c.json({ message: error.message }, 400);
+      }
+
+      throw error;
+    }
+  });
 
   student.post("/certificates/upload", requireStudentAuth, async (c) => {
     const studentAuth = c.get("studentAuth");
