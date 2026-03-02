@@ -172,6 +172,28 @@ export const tasks = mysqlTable(
   })
 );
 
+export const taskCheckIns = mysqlTable(
+  "task_check_ins",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    taskId: int("task_id")
+      .notNull()
+      .references(() => tasks.id),
+    studentId: int("student_id")
+      .notNull()
+      .references(() => students.id),
+    fileId: varchar("file_id", { length: 64 }),
+    note: varchar("note", { length: 255 }),
+    submittedAt: timestamp("submitted_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull()
+  },
+  (table) => ({
+    taskStudentUnique: uniqueIndex("task_check_ins_task_student_unique").on(table.taskId, table.studentId),
+    taskIdIdx: index("task_check_ins_task_id_idx").on(table.taskId),
+    studentIdIdx: index("task_check_ins_student_id_idx").on(table.studentId)
+  })
+);
+
 export const certificates = mysqlTable(
   "certificates",
   {

@@ -21,6 +21,11 @@ import {
 } from "../modules/role-model/matching.js";
 import type { ReportGenerationService } from "../modules/report/generation.js";
 import type { ReportJobSyncService } from "../modules/report/job-sync.js";
+import {
+  TaskCheckInCertificateNotFoundError,
+  TaskCheckInTaskNotFoundError,
+  type TaskCheckInService
+} from "../modules/task/checkin.js";
 
 export interface StudentRouteDependencies {
   requireStudentAuth: MiddlewareHandler;
@@ -30,6 +35,7 @@ export interface StudentRouteDependencies {
   roleModelMatchingService?: Pick<RoleModelMatchingService, "matchRoleModels">;
   reportGenerationService?: Pick<ReportGenerationService, "generateAllReports">;
   reportJobSyncService?: Pick<ReportJobSyncService, "syncGeneratedReports">;
+  taskCheckInService?: Pick<TaskCheckInService, "submitTaskCheckIn">;
 }
 
 const isUploadedFile = (value: unknown): value is UploadedFile => {
@@ -91,6 +97,11 @@ export const createStudentRoutes = ({
   reportJobSyncService = {
     async syncGeneratedReports() {
       throw new Error("reportJobSyncService is not configured");
+    }
+  },
+  taskCheckInService = {
+    async submitTaskCheckIn() {
+      throw new Error("taskCheckInService is not configured");
     }
   }
 }: StudentRouteDependencies) => {
@@ -218,6 +229,49 @@ export const createStudentRoutes = ({
       },
       200
     );
+  });
+
+  student.post("/tasks/:taskId/check-ins", requireStudentAuth, async (c) => {
+    const studentAuth = c.get("studentAuth");
+    if (!studentAuth) {
+      return c.json({ message: "unauthorized" }, 401);
+    }
+
+    const taskId = Number.parseInt(c.req.param("taskId"), 10);
+    if (!Number.isInteger(taskId) || taskId <= 0) {
+      return c.json({ message: "invalid task id" }, 400);
+    }
+
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ message: "invalid request body" }, 400);
+    }
+
+    const fileIdRaw = (body as { fileId?: unknown })?.fileId;
+    const noteRaw = (body as { note?: unknown })?.note;
+    const fileId = typeof fileIdRaw === "string" && fileIdRaw.trim().length > 0 ? fileIdRaw.trim() : null;
+    const note = typeof noteRaw === "string" && noteRaw.trim().length > 0 ? noteRaw.trim() : null;
+
+    try {
+      const result = await taskCheckInService.submitTaskCheckIn({
+        taskId,
+        studentId: studentAuth.studentId,
+        fileId,
+        note
+      });
+
+      return c.json(result, 200);
+    } catch (error) {
+      if (error instanceof TaskCheckInTaskNotFoundError) {
+        return c.json({ message: "task not found" }, 404);
+      }
+      if (error instanceof TaskCheckInCertificateNotFoundError) {
+        return c.json({ message: "certificate file not found" }, 404);
+      }
+      throw error;
+    }
   });
 
   student.post("/certificates/upload", requireStudentAuth, async (c) => {

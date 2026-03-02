@@ -78,6 +78,13 @@
       "when": 1772416719533,
       "tag": "0010_report_generation_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1772417310063,
+      "tag": "0011_task_check_ins",
+      "breakpoints": true
     }
   ]
 }

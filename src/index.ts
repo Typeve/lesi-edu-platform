@@ -18,6 +18,7 @@ import {
   reportGenerationJobs,
   reports,
   students,
+  taskCheckIns,
   tasks,
   teacherClassGrants,
   teacherStudentGrants
@@ -51,6 +52,7 @@ import { createLikertAssessmentResultService } from "./modules/assessment/result
 import { createRoleModelMatchingService } from "./modules/role-model/matching.js";
 import { createReportGenerationService } from "./modules/report/generation.js";
 import { createReportJobSyncService } from "./modules/report/job-sync.js";
+import { createTaskCheckInService } from "./modules/task/checkin.js";
 import { createEnrollmentProfileService } from "./modules/enrollment/profile.js";
 import { createExcelImportValidationService } from "./modules/import/excel-validation.js";
 import { createCertificateUploadService } from "./modules/upload/certificate-upload.js";
@@ -305,6 +307,76 @@ const reportJobRepo = {
 };
 const reportJobSyncService = createReportJobSyncService({
   reportJobRepo
+});
+
+const taskCheckInRepo = {
+  async findTaskByIdAndStudentId(taskId: number, studentId: number) {
+    const records = await db
+      .select({
+        id: tasks.id,
+        studentId: tasks.studentId
+      })
+      .from(tasks)
+      .where(and(eq(tasks.id, taskId), eq(tasks.studentId, studentId)))
+      .limit(1);
+
+    return records[0] ?? null;
+  },
+  async hasCertificateFileForStudent(studentId: number, fileId: string) {
+    const records = await db
+      .select({
+        id: certificateFiles.id
+      })
+      .from(certificateFiles)
+      .where(and(eq(certificateFiles.studentId, studentId), eq(certificateFiles.fileId, fileId)))
+      .limit(1);
+
+    return records.length > 0;
+  },
+  async upsertTaskCheckIn({ taskId, studentId, fileId, note, submittedAt }: {
+    taskId: number;
+    studentId: number;
+    fileId: string | null;
+    note: string | null;
+    submittedAt: Date;
+  }) {
+    const existing = await db
+      .select({
+        id: taskCheckIns.id
+      })
+      .from(taskCheckIns)
+      .where(and(eq(taskCheckIns.taskId, taskId), eq(taskCheckIns.studentId, studentId)))
+      .limit(1);
+
+    if (existing[0]) {
+      await db
+        .update(taskCheckIns)
+        .set({
+          fileId,
+          note,
+          submittedAt
+        })
+        .where(eq(taskCheckIns.id, existing[0].id));
+      return existing[0].id;
+    }
+
+    const insertResult = await db
+      .insert(taskCheckIns)
+      .values({
+        taskId,
+        studentId,
+        fileId,
+        note,
+        submittedAt,
+        createdAt: submittedAt
+      });
+
+    return Number(insertResult[0].insertId);
+  }
+};
+
+const taskCheckInService = createTaskCheckInService({
+  taskCheckInRepo
 });
 
 const requireStudentAuth = createStudentAuthMiddleware({
@@ -912,7 +984,8 @@ app.route(
     likertAssessmentResultService,
     roleModelMatchingService,
     reportGenerationService,
-    reportJobSyncService
+    reportJobSyncService,
+    taskCheckInService
   })
 );
 
