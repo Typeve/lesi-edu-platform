@@ -54,6 +54,7 @@ import { createReportGenerationService } from "./modules/report/generation.js";
 import { createReportJobSyncService } from "./modules/report/job-sync.js";
 import { createTaskCheckInService } from "./modules/task/checkin.js";
 import { createTeacherMyStudentsService } from "./modules/teacher/my-students.js";
+import { createTeacherStudentDetailService } from "./modules/teacher/student-detail.js";
 import { createEnrollmentProfileService } from "./modules/enrollment/profile.js";
 import { createExcelImportValidationService } from "./modules/import/excel-validation.js";
 import { createCertificateUploadService } from "./modules/upload/certificate-upload.js";
@@ -511,6 +512,84 @@ const teacherMyStudentsRepo = {
 
 const teacherMyStudentsService = createTeacherMyStudentsService({
   teacherMyStudentsRepo
+});
+
+const teacherStudentDetailRepo = {
+  async isStudentAuthorized(teacherId: string, studentId: number) {
+    const direct = await db
+      .select({ id: teacherStudentGrants.id })
+      .from(teacherStudentGrants)
+      .where(and(eq(teacherStudentGrants.teacherId, teacherId), eq(teacherStudentGrants.studentId, studentId)))
+      .limit(1);
+    if (direct.length > 0) {
+      return true;
+    }
+
+    const studentRow = await db
+      .select({ classId: students.classId })
+      .from(students)
+      .where(eq(students.id, studentId))
+      .limit(1);
+    if (!studentRow[0]) {
+      return false;
+    }
+
+    const classGrant = await db
+      .select({ id: teacherClassGrants.id })
+      .from(teacherClassGrants)
+      .where(and(eq(teacherClassGrants.teacherId, teacherId), eq(teacherClassGrants.classId, studentRow[0].classId)))
+      .limit(1);
+    return classGrant.length > 0;
+  },
+  async getStudentProfile(studentId: number) {
+    const rows = await db
+      .select({
+        studentId: students.id,
+        studentNo: students.studentNo,
+        name: students.name
+      })
+      .from(students)
+      .where(eq(students.id, studentId))
+      .limit(1);
+    return rows[0] ?? null;
+  },
+  async getAssessmentSummary(studentId: number) {
+    const rows = await db
+      .select({ id: assessmentSubmissions.id })
+      .from(assessmentSubmissions)
+      .where(eq(assessmentSubmissions.studentId, studentId))
+      .limit(1);
+    return { done: rows.length > 0 };
+  },
+  async getReportSummary(studentId: number) {
+    const rows = await db
+      .select({ id: reports.id })
+      .from(reports)
+      .where(eq(reports.studentId, studentId));
+    return { count: rows.length };
+  },
+  async getTaskSummary(studentId: number) {
+    const rows = await db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(eq(tasks.studentId, studentId));
+    return { count: rows.length };
+  },
+  async listCertificateFiles(studentId: number) {
+    return db
+      .select({
+        fileId: certificateFiles.fileId,
+        originalName: certificateFiles.originalName,
+        mimeType: certificateFiles.mimeType,
+        sizeBytes: certificateFiles.sizeBytes
+      })
+      .from(certificateFiles)
+      .where(eq(certificateFiles.studentId, studentId));
+  }
+};
+
+const teacherStudentDetailService = createTeacherStudentDetailService({
+  teacherStudentDetailRepo
 });
 
 const requireStudentAuth = createStudentAuthMiddleware({
@@ -1112,7 +1191,8 @@ app.route("/resources", createResourcesRoutes({ createResourceAuthorization }));
 app.route(
   "/teacher",
   createTeacherRoutes({
-    teacherMyStudentsService
+    teacherMyStudentsService,
+    teacherStudentDetailService
   })
 );
 app.route(
