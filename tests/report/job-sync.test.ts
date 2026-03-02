@@ -3,13 +3,12 @@ import assert from "node:assert/strict";
 import { Hono, type MiddlewareHandler } from "hono";
 import { createStudentRoutes } from "../../src/routes/student.ts";
 import {
-  createReportGenerationService,
-  type ReportGenerationInput
-} from "../../src/modules/report/generation.ts";
+  createReportJobSyncService,
+  type ReportJobSyncRepository
+} from "../../src/modules/report/job-sync.ts";
 
 const authorizedStudentMiddleware: MiddlewareHandler = async (c, next) => {
   const authorization = c.req.header("authorization") ?? "";
-
   if (authorization !== "Bearer valid-token") {
     return c.json({ message: "unauthorized" }, 401);
   }
@@ -23,31 +22,38 @@ const authorizedStudentMiddleware: MiddlewareHandler = async (c, next) => {
   await next();
 };
 
-const baseInput: ReportGenerationInput = {
-  studentNo: "S20261001",
-  dimensionScores: {
-    interest: 84,
-    ability: 86,
-    value: 82
-  },
-  recommendation: {
-    direction: "employment",
-    reason: "建议优先就业实践"
-  }
-};
+test("report job sync service should persist job payload with required fields", async () => {
+  const jobs: Array<{ studentNo: string; payloadJson: string; status: string }> = [];
 
-test("report generation service should output three markdown reports", async () => {
-  const service = createReportGenerationService();
-  const result = await service.generateAllReports(baseInput);
+  const repo: ReportJobSyncRepository = {
+    async createJob(input) {
+      jobs.push({
+        studentNo: input.studentNo,
+        payloadJson: input.payloadJson,
+        status: input.status
+      });
+      return 1;
+    }
+  };
 
-  assert.equal(result.reports.length, 3);
-  assert.ok(result.reports[0].markdown.includes("#"));
-  assert.ok(result.reports.some((item) => item.direction === "employment"));
-  assert.ok(result.reports.some((item) => item.direction === "postgraduate"));
-  assert.ok(result.reports.some((item) => item.direction === "civil_service"));
+  const service = createReportJobSyncService({ reportJobRepo: repo });
+
+  const result = await service.syncGeneratedReports({
+    studentNo: "S20261001",
+    reports: [
+      { direction: "employment", markdown: "# 就业" },
+      { direction: "postgraduate", markdown: "# 考研" },
+      { direction: "civil_service", markdown: "# 考公" }
+    ]
+  });
+
+  assert.equal(result.jobId, 1);
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].studentNo, "S20261001");
+  assert.equal(jobs[0].status, "done");
 });
 
-test("POST /student/reports/generate should return three reports", async () => {
+test("POST /student/reports/generate should return jobId after sync", async () => {
   const app = new Hono();
   app.route(
     "/student",
@@ -98,7 +104,7 @@ test("POST /student/reports/generate should return three reports", async () => {
       },
       reportJobSyncService: {
         async syncGeneratedReports() {
-          return { jobId: 1, status: "done" as const };
+          return { jobId: 99, status: "done" as const };
         }
       }
     })
@@ -106,12 +112,11 @@ test("POST /student/reports/generate should return three reports", async () => {
 
   const response = await app.request("/student/reports/generate", {
     method: "POST",
-    headers: {
-      authorization: "Bearer valid-token"
-    }
+    headers: { authorization: "Bearer valid-token" }
   });
 
   assert.equal(response.status, 200);
   const payload = await response.json();
+  assert.equal(payload.jobId, 99);
   assert.equal(payload.reports.length, 3);
 });

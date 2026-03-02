@@ -125,6 +125,21 @@ export const assessmentSubmissions = mysqlTable(
   })
 );
 
+export const reportGenerationJobs = mysqlTable(
+  "report_generation_jobs",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    studentNo: varchar("student_no", { length: 32 }).notNull(),
+    payloadJson: text("payload_json").notNull(),
+    status: varchar("status", { length: 16 }).notNull().default("done"),
+    createdAt: timestamp("created_at").defaultNow().notNull()
+  },
+  (table) => ({
+    studentNoIdx: index("report_generation_jobs_student_no_idx").on(table.studentNo),
+    createdAtIdx: index("report_generation_jobs_created_at_idx").on(table.createdAt)
+  })
+);
+
 export const reports = mysqlTable(
   "reports",
   {

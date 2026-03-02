@@ -15,6 +15,7 @@ import {
   enrollmentProfiles,
   majors,
   profiles,
+  reportGenerationJobs,
   reports,
   students,
   tasks,
@@ -49,6 +50,7 @@ import { createLikertAssessmentService } from "./modules/assessment/likert.js";
 import { createLikertAssessmentResultService } from "./modules/assessment/result.js";
 import { createRoleModelMatchingService } from "./modules/role-model/matching.js";
 import { createReportGenerationService } from "./modules/report/generation.js";
+import { createReportJobSyncService } from "./modules/report/job-sync.js";
 import { createEnrollmentProfileService } from "./modules/enrollment/profile.js";
 import { createExcelImportValidationService } from "./modules/import/excel-validation.js";
 import { createCertificateUploadService } from "./modules/upload/certificate-upload.js";
@@ -282,6 +284,28 @@ const roleModelMatchingService = createRoleModelMatchingService({
 });
 
 const reportGenerationService = createReportGenerationService();
+const reportJobRepo = {
+  async createJob({ studentNo, payloadJson, status, createdAt }: {
+    studentNo: string;
+    payloadJson: string;
+    status: "done";
+    createdAt: Date;
+  }) {
+    const insertResult = await db
+      .insert(reportGenerationJobs)
+      .values({
+        studentNo,
+        payloadJson,
+        status,
+        createdAt
+      });
+
+    return Number(insertResult[0].insertId);
+  }
+};
+const reportJobSyncService = createReportJobSyncService({
+  reportJobRepo
+});
 
 const requireStudentAuth = createStudentAuthMiddleware({
   tokenVerifier: createJwtTokenVerifier({
@@ -887,7 +911,8 @@ app.route(
     likertAssessmentService,
     likertAssessmentResultService,
     roleModelMatchingService,
-    reportGenerationService
+    reportGenerationService,
+    reportJobSyncService
   })
 );
 

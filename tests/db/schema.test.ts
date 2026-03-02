@@ -12,6 +12,7 @@ import {
   enrollmentProfiles,
   majors,
   profiles,
+  reportGenerationJobs,
   reports,
   roleScopes,
   roles,
@@ -107,4 +108,11 @@ test("schema should include assessment_submissions overwrite table", () => {
   assert.equal(assessmentSubmissions.questionSetVersion.name, "question_set_version");
   assert.equal(assessmentSubmissions.answersJson.name, "answers_json");
   assert.equal(assessmentSubmissions.answerCount.name, "answer_count");
+});
+
+test("schema should include report_generation_jobs sync table", () => {
+  assert.equal(reportGenerationJobs[Symbol.for("drizzle:Name")], "report_generation_jobs");
+  assert.equal(reportGenerationJobs.studentNo.name, "student_no");
+  assert.equal(reportGenerationJobs.payloadJson.name, "payload_json");
+  assert.equal(reportGenerationJobs.status.name, "status");
 });
