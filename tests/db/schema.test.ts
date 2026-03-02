@@ -17,6 +17,7 @@ import {
   roleScopes,
   roles,
   students,
+  taskCheckIns,
   tasks,
   teacherClassGrants,
   teacherStudentGrants
@@ -115,4 +116,12 @@ test("schema should include report_generation_jobs sync table", () => {
   assert.equal(reportGenerationJobs.studentNo.name, "student_no");
   assert.equal(reportGenerationJobs.payloadJson.name, "payload_json");
   assert.equal(reportGenerationJobs.status.name, "status");
+});
+
+test("schema should include task_check_ins table for check-in flow", () => {
+  assert.equal(taskCheckIns[Symbol.for("drizzle:Name")], "task_check_ins");
+  assert.equal(taskCheckIns.taskId.name, "task_id");
+  assert.equal(taskCheckIns.studentId.name, "student_id");
+  assert.equal(taskCheckIns.fileId.name, "file_id");
+  assert.equal(taskCheckIns.note.name, "note");
 });
