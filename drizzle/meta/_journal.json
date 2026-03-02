@@ -71,6 +71,13 @@
       "when": 1772415578728,
       "tag": "0009_assessment_submissions",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1772416719533,
+      "tag": "0010_report_generation_jobs",
+      "breakpoints": true
     }
   ]
 }

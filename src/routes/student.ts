@@ -20,6 +20,7 @@ import {
   type RoleModelMatchingService
 } from "../modules/role-model/matching.js";
 import type { ReportGenerationService } from "../modules/report/generation.js";
+import type { ReportJobSyncService } from "../modules/report/job-sync.js";
 
 export interface StudentRouteDependencies {
   requireStudentAuth: MiddlewareHandler;
@@ -28,6 +29,7 @@ export interface StudentRouteDependencies {
   likertAssessmentResultService?: Pick<LikertAssessmentResultService, "getResult">;
   roleModelMatchingService?: Pick<RoleModelMatchingService, "matchRoleModels">;
   reportGenerationService?: Pick<ReportGenerationService, "generateAllReports">;
+  reportJobSyncService?: Pick<ReportJobSyncService, "syncGeneratedReports">;
 }
 
 const isUploadedFile = (value: unknown): value is UploadedFile => {
@@ -84,6 +86,11 @@ export const createStudentRoutes = ({
   reportGenerationService = {
     async generateAllReports() {
       throw new Error("reportGenerationService is not configured");
+    }
+  },
+  reportJobSyncService = {
+    async syncGeneratedReports() {
+      throw new Error("reportJobSyncService is not configured");
     }
   }
 }: StudentRouteDependencies) => {
@@ -198,7 +205,19 @@ export const createStudentRoutes = ({
       recommendation: assessmentResult.recommendation
     });
 
-    return c.json(generated, 200);
+    const syncResult = await reportJobSyncService.syncGeneratedReports({
+      studentNo: studentAuth.studentNo,
+      reports: generated.reports
+    });
+
+    return c.json(
+      {
+        ...generated,
+        jobId: syncResult.jobId,
+        status: syncResult.status
+      },
+      200
+    );
   });
 
   student.post("/certificates/upload", requireStudentAuth, async (c) => {
