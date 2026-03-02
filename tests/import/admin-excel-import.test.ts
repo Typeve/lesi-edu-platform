@@ -39,7 +39,7 @@ const createNoopAdminApp = (
       },
       activityService: {
         async publishActivity() {
-          return;
+          return { activityId: 1 };
         }
       },
       auditLogService: {

@@ -291,10 +291,19 @@ export const activities = mysqlTable(
     id: int("id").autoincrement().primaryKey(),
     activityType: mysqlEnum("activity_type", ["course", "competition", "project"]).notNull(),
     title: varchar("title", { length: 128 }).notNull(),
+    scopeType: mysqlEnum("scope_type", ["school", "college", "class"]).notNull().default("school"),
+    scopeTargetId: int("scope_target_id").notNull().default(0),
+    ownerTeacherId: varchar("owner_teacher_id", { length: 64 }).notNull(),
+    startAt: timestamp("start_at").notNull().defaultNow(),
+    endAt: timestamp("end_at").notNull().defaultNow(),
+    timelineJson: text("timeline_json").notNull(),
+    status: mysqlEnum("status", ["draft", "published", "closed"]).notNull().default("published"),
     createdAt: timestamp("created_at").defaultNow().notNull()
   },
   (table) => ({
-    activityTypeIdx: index("activities_activity_type_idx").on(table.activityType)
+    activityTypeIdx: index("activities_activity_type_idx").on(table.activityType),
+    statusIdx: index("activities_status_idx").on(table.status),
+    ownerTeacherIdIdx: index("activities_owner_teacher_id_idx").on(table.ownerTeacherId)
   })
 );
 

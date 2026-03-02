@@ -8,7 +8,17 @@ import type { AuthorizationGrantInput } from "../../src/modules/authorization/gr
 interface OperationFixture {
   assigned: Array<{ grantType: "student" | "class"; teacherId: string; targetId: number; accessLevel?: "read" | "manage" }>;
   revoked: Array<{ grantType: "student" | "class"; teacherId: string; targetId: number }>;
-  published: Array<{ activityType: "course" | "competition" | "project"; title: string }>;
+  published: Array<{
+    activityType: "course" | "competition" | "project";
+    title: string;
+    scopeType: "school" | "college" | "class";
+    scopeTargetId: number;
+    ownerTeacherId: string;
+    startAt: Date;
+    endAt: Date;
+    timelineNodes: Array<{ key: string; at: string }>;
+    status?: "draft" | "published" | "closed";
+  }>;
   auditActions: string[];
 }
 
@@ -37,6 +47,10 @@ const buildApp = (fixture: OperationFixture) => {
       activityService: {
         async publishActivity(input: PublishActivityInput) {
           fixture.published.push(input);
+          return { activityId: 1 };
+        },
+        async listActivities() {
+          return [];
         }
       },
       auditLogService: {
@@ -122,7 +136,16 @@ test("admin activity publish endpoint should write audit log", async () => {
     },
     body: JSON.stringify({
       activityType: "course",
-      title: "就业指导课"
+      title: "就业指导课",
+      scopeType: "class",
+      scopeTargetId: 11,
+      ownerTeacherId: "teacher-1",
+      startAt: "2026-03-02T08:00:00.000Z",
+      endAt: "2026-03-10T08:00:00.000Z",
+      timelineNodes: [
+        { key: "signup", at: "2026-03-03T08:00:00.000Z" },
+        { key: "execute", at: "2026-03-08T08:00:00.000Z" }
+      ]
     })
   });
 
@@ -183,4 +206,85 @@ test("admin authorization batch grant/revoke should support multiple items and a
     "authorization_revoke",
     "authorization_revoke"
   ]);
+});
+
+test("admin activity publish should return 400 when payload missing scope/owner/time", async () => {
+  const fixture: OperationFixture = {
+    assigned: [],
+    revoked: [],
+    published: [],
+    auditActions: []
+  };
+  const app = buildApp(fixture);
+
+  const publishRes = await app.request("/admin/activities", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "X-Admin-Key": adminApiKey,
+      "X-Admin-Operator-Id": "admin-002"
+    },
+    body: JSON.stringify({
+      activityType: "course",
+      title: "就业指导课"
+    })
+  });
+
+  assert.equal(publishRes.status, 400);
+});
+
+test("admin should list activity statuses", async () => {
+  const app = new Hono();
+  app.route(
+    "/admin",
+    createAdminRoutes({
+      studentAuthService: {
+        async resetStudentPasswordByAdmin() {
+          return;
+        }
+      },
+      adminApiKey,
+      authorizationGrantService: {
+        async assignGrant() {},
+        async revokeGrant() {}
+      },
+      activityService: {
+        async publishActivity() {
+          return { activityId: 1 };
+        },
+        async listActivities() {
+          return [
+            {
+              activityId: 1,
+              activityType: "course" as const,
+              title: "就业指导课",
+              scopeType: "class" as const,
+              scopeTargetId: 11,
+              ownerTeacherId: "teacher-1",
+              startAt: new Date("2026-03-02T08:00:00.000Z"),
+              endAt: new Date("2026-03-10T08:00:00.000Z"),
+              status: "published" as const,
+              timelineNodes: [{ key: "execute", at: "2026-03-08T08:00:00.000Z" }]
+            }
+          ];
+        }
+      },
+      auditLogService: {
+        async logAuthorizationGrant() {},
+        async logAuthorizationRevoke() {},
+        async logPasswordReset() {},
+        async logActivityPublish() {}
+      }
+    })
+  );
+
+  const response = await app.request("/admin/activities", {
+    method: "GET",
+    headers: { "X-Admin-Key": adminApiKey }
+  });
+
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.items.length, 1);
+  assert.equal(payload.items[0].status, "published");
 });

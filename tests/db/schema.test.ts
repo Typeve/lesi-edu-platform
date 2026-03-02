@@ -77,6 +77,13 @@ test("schema should include activity and audit log tables", () => {
 
   assert.equal(activities.activityType.name, "activity_type");
   assert.equal(activities.title.name, "title");
+  assert.equal(activities.scopeType.name, "scope_type");
+  assert.equal(activities.scopeTargetId.name, "scope_target_id");
+  assert.equal(activities.ownerTeacherId.name, "owner_teacher_id");
+  assert.equal(activities.startAt.name, "start_at");
+  assert.equal(activities.endAt.name, "end_at");
+  assert.equal(activities.timelineJson.name, "timeline_json");
+  assert.equal(activities.status.name, "status");
 
   assert.equal(auditLogs.operator.name, "operator");
   assert.equal(auditLogs.action.name, "action");
