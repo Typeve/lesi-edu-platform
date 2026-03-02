@@ -85,6 +85,26 @@ export const students = mysqlTable(
   })
 );
 
+export const enrollmentProfiles = mysqlTable(
+  "enrollment_profiles",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    studentNo: varchar("student_no", { length: 32 }).notNull(),
+    name: varchar("name", { length: 64 }),
+    schoolName: varchar("school_name", { length: 128 }),
+    majorName: varchar("major_name", { length: 128 }),
+    score: int("score"),
+    admissionYear: int("admission_year"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull()
+  },
+  (table) => ({
+    studentNoUnique: uniqueIndex("enrollment_profiles_student_no_unique").on(table.studentNo),
+    studentNoIdx: index("enrollment_profiles_student_no_idx").on(table.studentNo),
+    admissionYearIdx: index("enrollment_profiles_admission_year_idx").on(table.admissionYear)
+  })
+);
+
 export const reports = mysqlTable(
   "reports",
   {
