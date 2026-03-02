@@ -21,6 +21,7 @@ import {
   students,
   taskCheckIns,
   tasks,
+  teachers,
   teacherActivityAssignments,
   teacherClassGrants,
   teacherStudentGrants
@@ -828,6 +829,60 @@ const auditLogService = createAuditLogService({
   auditLogRepo
 });
 
+const adminOrgService = {
+  async createCollege({ schoolId, name }: { schoolId: number; name: string }) {
+    const inserted = await db
+      .insert(colleges)
+      .values({
+        schoolId,
+        name
+      });
+    return { collegeId: Number(inserted[0].insertId) };
+  },
+  async updateCollege({ collegeId, name }: { collegeId: number; name: string }) {
+    await db
+      .update(colleges)
+      .set({ name })
+      .where(eq(colleges.id, collegeId));
+  },
+  async deleteCollege({ collegeId }: { collegeId: number }) {
+    await db.delete(colleges).where(eq(colleges.id, collegeId));
+  }
+};
+
+const teacherAccountService = {
+  async createTeacherAccount({ name, account, password, status }: {
+    name: string;
+    account: string;
+    password: string;
+    status: "active" | "frozen";
+  }) {
+    const teacherId = `T-${Date.now()}`;
+    const passwordHash = await bcryptPasswordHasher.hash(password);
+    await db.insert(teachers).values({
+      teacherId,
+      name,
+      account,
+      passwordHash,
+      status
+    });
+    return { teacherId };
+  },
+  async updateTeacherStatus({ teacherId, status }: { teacherId: string; status: "active" | "frozen" }) {
+    await db
+      .update(teachers)
+      .set({ status })
+      .where(eq(teachers.teacherId, teacherId));
+  },
+  async resetTeacherPassword({ teacherId, newPassword }: { teacherId: string; newPassword: string }) {
+    const passwordHash = await bcryptPasswordHasher.hash(newPassword);
+    await db
+      .update(teachers)
+      .set({ passwordHash })
+      .where(eq(teachers.teacherId, teacherId));
+  }
+};
+
 const excelImportValidationService = createExcelImportValidationService();
 const dashboardSlowQueryObserver = createDashboardSlowQueryObserver({
   slowQueryThresholdMs: env.METRICS_SLOW_QUERY_THRESHOLD_MS
@@ -1240,6 +1295,8 @@ app.route(
     excelImportValidationService,
     dashboardDimensionAggregationService,
     dashboardTrendFunnelService,
+    adminOrgService,
+    teacherAccountService,
     adminApiKey: env.ADMIN_API_KEY
   })
 );

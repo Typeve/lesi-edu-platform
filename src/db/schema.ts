@@ -407,3 +407,20 @@ export const roleScopes = mysqlTable(
     scopeIdIdx: index("role_scopes_scope_id_idx").on(table.scopeId)
   })
 );
+
+export const teachers = mysqlTable(
+  "teachers",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    teacherId: varchar("teacher_id", { length: 64 }).notNull(),
+    name: varchar("name", { length: 64 }).notNull(),
+    account: varchar("account", { length: 64 }).notNull(),
+    passwordHash: varchar("password_hash", { length: 255 }).notNull(),
+    status: varchar("status", { length: 16 }).notNull().default("active"),
+    createdAt: timestamp("created_at").defaultNow().notNull()
+  },
+  (table) => ({
+    teacherIdUnique: uniqueIndex("teachers_teacher_id_unique").on(table.teacherId),
+    accountUnique: uniqueIndex("teachers_account_unique").on(table.account)
+  })
+);
