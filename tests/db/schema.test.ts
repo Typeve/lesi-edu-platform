@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  assessmentSubmissions,
   activities,
   authScopes,
   auditLogs,
@@ -98,4 +99,12 @@ test("schema should include enrollment_profiles read-only source table", () => {
   assert.equal(enrollmentProfiles.studentNo.name, "student_no");
   assert.equal(enrollmentProfiles.score.name, "score");
   assert.equal(enrollmentProfiles.admissionYear.name, "admission_year");
+});
+
+test("schema should include assessment_submissions overwrite table", () => {
+  assert.equal(assessmentSubmissions[Symbol.for("drizzle:Name")], "assessment_submissions");
+  assert.equal(assessmentSubmissions.studentId.name, "student_id");
+  assert.equal(assessmentSubmissions.questionSetVersion.name, "question_set_version");
+  assert.equal(assessmentSubmissions.answersJson.name, "answers_json");
+  assert.equal(assessmentSubmissions.answerCount.name, "answer_count");
 });

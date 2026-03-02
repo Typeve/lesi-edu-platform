@@ -4,6 +4,7 @@ import {
   int,
   mysqlEnum,
   mysqlTable,
+  text,
   timestamp,
   uniqueIndex,
   varchar
@@ -102,6 +103,25 @@ export const enrollmentProfiles = mysqlTable(
     studentNoUnique: uniqueIndex("enrollment_profiles_student_no_unique").on(table.studentNo),
     studentNoIdx: index("enrollment_profiles_student_no_idx").on(table.studentNo),
     admissionYearIdx: index("enrollment_profiles_admission_year_idx").on(table.admissionYear)
+  })
+);
+
+export const assessmentSubmissions = mysqlTable(
+  "assessment_submissions",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    studentId: int("student_id")
+      .notNull()
+      .references(() => students.id),
+    questionSetVersion: varchar("question_set_version", { length: 32 }).notNull().default("v1"),
+    answersJson: text("answers_json").notNull(),
+    answerCount: int("answer_count").notNull(),
+    submittedAt: timestamp("submitted_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull()
+  },
+  (table) => ({
+    studentIdUnique: uniqueIndex("assessment_submissions_student_id_unique").on(table.studentId),
+    submittedAtIdx: index("assessment_submissions_submitted_at_idx").on(table.submittedAt)
   })
 );
 
