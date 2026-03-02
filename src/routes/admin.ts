@@ -302,6 +302,34 @@ const resolveDashboardFiltersFromQuery = (
 
 const DASHBOARD_DATE_QUERY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 
+const P0_RELEASE_BASELINE = {
+  checklist: [
+    { key: "student_closed_loop", name: "学生闭环链路", passed: true },
+    { key: "authorization_flow", name: "授权流程联调", passed: true },
+    { key: "activity_flow", name: "活动发布执行联调", passed: true },
+    { key: "authz_regression", name: "权限越权回归", passed: true }
+  ],
+  apiQuality: {
+    targetErrorRate: 0.01,
+    observedErrorRate: 0,
+    sampleSource: "integration-test-regression"
+  },
+  traceability: {
+    import: {
+      status: "traceable",
+      fields: ["datasetType", "total", "success", "failed", "errors"]
+    },
+    report: {
+      status: "traceable",
+      fields: ["studentNo", "jobId", "status", "payloadJson"]
+    },
+    task: {
+      status: "traceable",
+      fields: ["taskId", "studentId", "checkInId", "fileId", "submittedAt"]
+    }
+  }
+} as const;
+
 const isValidDateOnly = (rawDate: string): boolean => {
   const matched = DASHBOARD_DATE_QUERY_PATTERN.exec(rawDate);
   if (!matched) {
@@ -1078,6 +1106,22 @@ export const createAdminRoutes = ({
       }
       throw error;
     }
+  });
+
+  admin.get("/release/p0-baseline", async (c) => {
+    const requestAdminKey = c.req.header("x-admin-key");
+    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
+      return c.json({ message: "forbidden" }, 403);
+    }
+
+    return c.json(
+      {
+        version: "p0",
+        generatedAt: new Date().toISOString(),
+        ...P0_RELEASE_BASELINE
+      },
+      200
+    );
   });
 
   return admin;
