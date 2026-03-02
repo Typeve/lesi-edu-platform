@@ -34,7 +34,7 @@ const createApp = (calls: CallSnapshot[] = []) => {
       },
       activityService: {
         async publishActivity() {
-          return;
+          return { activityId: 1 };
         }
       },
       auditLogService: {

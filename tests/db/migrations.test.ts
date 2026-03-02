@@ -18,13 +18,13 @@ test("drizzle migration metadata chain should be continuous", () => {
   const entries = journal.entries as Array<{ idx: number; tag: string }>;
 
   assert.ok(Array.isArray(entries), "journal entries should be an array");
-  assert.ok(entries.length >= 14, "journal should contain at least 14 entries");
+  assert.ok(entries.length >= 15, "journal should contain at least 15 entries");
 
   entries.forEach((entry, index) => {
     assert.equal(entry.idx, index, `journal idx should be continuous at ${index}`);
   });
 
-  for (const prefix of ["0000", "0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008", "0009", "0010", "0011", "0012", "0013", "0014"]) {
+  for (const prefix of ["0000", "0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008", "0009", "0010", "0011", "0012", "0013", "0014", "0015"]) {
     assert.ok(
       entries.some((entry) => entry.tag.startsWith(`${prefix}_`)),
       `journal should include migration ${prefix}`
@@ -234,4 +234,18 @@ test("0014 migration file should include access_level for teacher grants", () =>
   assert.match(migrationSql, /ALTER TABLE\s+`teacher_student_grants`/i);
   assert.match(migrationSql, /ALTER TABLE\s+`teacher_class_grants`/i);
   assert.match(migrationSql, /`access_level`\s+enum\('read','manage'\)/i);
+});
+
+test("0015 migration file should include activity center fields", () => {
+  const migrationFiles = fs.readdirSync(drizzleDir);
+  const migration0015 = migrationFiles.find((fileName) => /^0015_.*\.sql$/.test(fileName));
+
+  assert.ok(migration0015, "expected a 0015 migration SQL file");
+
+  const migrationSql = fs.readFileSync(path.join(drizzleDir, migration0015), "utf8");
+  assert.match(migrationSql, /ALTER TABLE\s+`activities`/i);
+  assert.match(migrationSql, /`scope_type`\s+enum\('school','college','class'\)/i);
+  assert.match(migrationSql, /`owner_teacher_id`\s+varchar\(64\)/i);
+  assert.match(migrationSql, /`timeline_json`\s+text/i);
+  assert.match(migrationSql, /`status`\s+enum\('draft','published','closed'\)/i);
 });

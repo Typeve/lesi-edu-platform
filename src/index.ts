@@ -783,15 +783,74 @@ const authorizationGrantService = createAuthorizationGrantService({
 const activityRepo = {
   async publishActivity({
     activityType,
-    title
+    title,
+    scopeType,
+    scopeTargetId,
+    ownerTeacherId,
+    startAt,
+    endAt,
+    timelineNodes,
+    status
   }: {
     activityType: "course" | "competition" | "project";
     title: string;
-  }): Promise<void> {
-    await db.insert(activities).values({
+    scopeType: "school" | "college" | "class";
+    scopeTargetId: number;
+    ownerTeacherId: string;
+    startAt: Date;
+    endAt: Date;
+    timelineNodes: Array<{ key: string; at: string }>;
+    status: "draft" | "published" | "closed";
+  }): Promise<{ activityId: number }> {
+    const inserted = await db.insert(activities).values({
       activityType,
-      title
+      title,
+      scopeType,
+      scopeTargetId,
+      ownerTeacherId,
+      startAt,
+      endAt,
+      timelineJson: JSON.stringify(timelineNodes),
+      status
     });
+
+    const activityId = Number(inserted[0].insertId);
+    await db.insert(teacherActivityAssignments).values({
+      activityId,
+      teacherId: ownerTeacherId
+    }).onDuplicateKeyUpdate({
+      set: { teacherId: ownerTeacherId }
+    });
+    return { activityId };
+  },
+  async listActivities() {
+    const rows = await db
+      .select({
+        activityId: activities.id,
+        activityType: activities.activityType,
+        title: activities.title,
+        scopeType: activities.scopeType,
+        scopeTargetId: activities.scopeTargetId,
+        ownerTeacherId: activities.ownerTeacherId,
+        startAt: activities.startAt,
+        endAt: activities.endAt,
+        status: activities.status,
+        timelineJson: activities.timelineJson
+      })
+      .from(activities);
+
+    return rows.map((row) => ({
+      activityId: row.activityId,
+      activityType: row.activityType,
+      title: row.title,
+      scopeType: row.scopeType,
+      scopeTargetId: row.scopeTargetId,
+      ownerTeacherId: row.ownerTeacherId,
+      startAt: row.startAt,
+      endAt: row.endAt,
+      status: row.status,
+      timelineNodes: JSON.parse(row.timelineJson) as Array<{ key: string; at: string }>
+    }));
   }
 };
 

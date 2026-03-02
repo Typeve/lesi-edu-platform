@@ -1,5 +1,10 @@
 import { Hono } from "hono";
-import type { ActivityService, ActivityType } from "../modules/activity/service.js";
+import type {
+  ActivityScopeType,
+  ActivityService,
+  ActivityTimelineNode,
+  ActivityType
+} from "../modules/activity/service.js";
 import type { AuditLogService } from "../modules/audit/service.js";
 import type { AccessLevel, AuthorizationGrantService, GrantType } from "../modules/authorization/grant-service.js";
 import {
@@ -42,6 +47,12 @@ interface AdminBatchGrantBody {
 interface AdminPublishActivityRequestBody {
   activityType: ActivityType;
   title: string;
+  scopeType: ActivityScopeType;
+  scopeTargetId: number;
+  ownerTeacherId: string;
+  startAt: string;
+  endAt: string;
+  timelineNodes: ActivityTimelineNode[];
 }
 
 interface AdminCollegeCreateBody {
@@ -73,7 +84,8 @@ interface AdminStudentArchiveCreateBody {
 export interface AdminRouteDependencies {
   studentAuthService: Pick<StudentAuthService, "resetStudentPasswordByAdmin">;
   authorizationGrantService: Pick<AuthorizationGrantService, "assignGrant" | "revokeGrant">;
-  activityService: Pick<ActivityService, "publishActivity">;
+  activityService: Pick<ActivityService, "publishActivity"> &
+    Partial<Pick<ActivityService, "listActivities">>;
   auditLogService: Pick<
     AuditLogService,
     "logAuthorizationGrant" | "logAuthorizationRevoke" | "logPasswordReset" | "logActivityPublish"
@@ -191,6 +203,31 @@ const isValidActivityType = (activityType: unknown): activityType is ActivityTyp
   return activityType === "course" || activityType === "competition" || activityType === "project";
 };
 
+const isValidActivityScopeType = (scopeType: unknown): scopeType is ActivityScopeType => {
+  return scopeType === "school" || scopeType === "college" || scopeType === "class";
+};
+
+const isValidDateTime = (value: unknown): value is string => {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return false;
+  }
+  return !Number.isNaN(new Date(value).getTime());
+};
+
+const isValidTimelineNodes = (value: unknown): value is ActivityTimelineNode[] => {
+  if (!Array.isArray(value)) {
+    return false;
+  }
+  return value.every((node) => {
+    if (!node || typeof node !== "object") {
+      return false;
+    }
+    const key = (node as { key?: unknown }).key;
+    const at = (node as { at?: unknown }).at;
+    return typeof key === "string" && key.trim().length > 0 && isValidDateTime(at);
+  });
+};
+
 const isValidPublishActivityBody = (body: unknown): body is AdminPublishActivityRequestBody => {
   if (!body || typeof body !== "object") {
     return false;
@@ -198,8 +235,25 @@ const isValidPublishActivityBody = (body: unknown): body is AdminPublishActivity
 
   const activityType = (body as { activityType?: unknown }).activityType;
   const title = (body as { title?: unknown }).title;
+  const scopeType = (body as { scopeType?: unknown }).scopeType;
+  const scopeTargetId = parseTargetId((body as { scopeTargetId?: unknown }).scopeTargetId);
+  const ownerTeacherId = (body as { ownerTeacherId?: unknown }).ownerTeacherId;
+  const startAt = (body as { startAt?: unknown }).startAt;
+  const endAt = (body as { endAt?: unknown }).endAt;
+  const timelineNodes = (body as { timelineNodes?: unknown }).timelineNodes;
 
-  return isValidActivityType(activityType) && typeof title === "string" && title.trim().length > 0;
+  return (
+    isValidActivityType(activityType) &&
+    typeof title === "string" &&
+    title.trim().length > 0 &&
+    isValidActivityScopeType(scopeType) &&
+    !!scopeTargetId &&
+    typeof ownerTeacherId === "string" &&
+    ownerTeacherId.trim().length > 0 &&
+    isValidDateTime(startAt) &&
+    isValidDateTime(endAt) &&
+    isValidTimelineNodes(timelineNodes)
+  );
 };
 
 const isForbiddenByAdminKey = (requestAdminKey: string | undefined, adminApiKey: string): boolean => {
@@ -795,12 +849,18 @@ export const createAdminRoutes = ({
     }
 
     if (!isValidPublishActivityBody(body)) {
-      return c.json({ message: "activityType/title is required" }, 400);
+      return c.json({ message: "activity publish payload is invalid" }, 400);
     }
 
     await activityService.publishActivity({
       activityType: body.activityType,
-      title: body.title.trim()
+      title: body.title.trim(),
+      scopeType: body.scopeType,
+      scopeTargetId: body.scopeTargetId,
+      ownerTeacherId: body.ownerTeacherId.trim(),
+      startAt: new Date(body.startAt),
+      endAt: new Date(body.endAt),
+      timelineNodes: body.timelineNodes
     });
 
     await auditLogService.logActivityPublish({
@@ -810,6 +870,26 @@ export const createAdminRoutes = ({
     });
 
     return c.json({ message: "activity published" }, 201);
+  });
+
+  admin.get("/activities", async (c) => {
+    const requestAdminKey = c.req.header("x-admin-key");
+    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
+      return c.json({ message: "forbidden" }, 403);
+    }
+
+    if (!activityService.listActivities) {
+      return c.json({ message: "activity list service not configured" }, 500);
+    }
+
+    const activities = await activityService.listActivities();
+    return c.json({
+      items: activities.map((activity) => ({
+        ...activity,
+        startAt: activity.startAt.toISOString(),
+        endAt: activity.endAt.toISOString()
+      }))
+    }, 200);
   });
 
   admin.post("/imports/excel/validate", async (c) => {
