@@ -18,13 +18,13 @@ test("drizzle migration metadata chain should be continuous", () => {
   const entries = journal.entries as Array<{ idx: number; tag: string }>;
 
   assert.ok(Array.isArray(entries), "journal entries should be an array");
-  assert.ok(entries.length >= 13, "journal should contain at least 13 entries");
+  assert.ok(entries.length >= 14, "journal should contain at least 14 entries");
 
   entries.forEach((entry, index) => {
     assert.equal(entry.idx, index, `journal idx should be continuous at ${index}`);
   });
 
-  for (const prefix of ["0000", "0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008", "0009", "0010", "0011", "0012"]) {
+  for (const prefix of ["0000", "0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008", "0009", "0010", "0011", "0012", "0013", "0014"]) {
     assert.ok(
       entries.some((entry) => entry.tag.startsWith(`${prefix}_`)),
       `journal should include migration ${prefix}`
@@ -222,4 +222,16 @@ test("0013 migration file should include teachers table", () => {
   assert.match(migrationSql, /CREATE TABLE\s+`teachers`/i);
   assert.match(migrationSql, /`account`\s+varchar\(64\)\s+NOT\s+NULL/i);
   assert.match(migrationSql, /UNIQUE\(`teacher_id`\)/i);
+});
+
+test("0014 migration file should include access_level for teacher grants", () => {
+  const migrationFiles = fs.readdirSync(drizzleDir);
+  const migration0014 = migrationFiles.find((fileName) => /^0014_.*\.sql$/.test(fileName));
+
+  assert.ok(migration0014, "expected a 0014 migration SQL file");
+
+  const migrationSql = fs.readFileSync(path.join(drizzleDir, migration0014), "utf8");
+  assert.match(migrationSql, /ALTER TABLE\s+`teacher_student_grants`/i);
+  assert.match(migrationSql, /ALTER TABLE\s+`teacher_class_grants`/i);
+  assert.match(migrationSql, /`access_level`\s+enum\('read','manage'\)/i);
 });

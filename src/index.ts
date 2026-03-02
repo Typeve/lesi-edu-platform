@@ -734,20 +734,19 @@ const resourceAuthorizationService = createResourceAuthorizationService({
 });
 
 const authorizationGrantRepo = {
-  async assignStudentGrant(teacherId: string, studentId: number): Promise<void> {
-    const existing = await db
-      .select({ id: teacherStudentGrants.id })
-      .from(teacherStudentGrants)
-      .where(and(eq(teacherStudentGrants.teacherId, teacherId), eq(teacherStudentGrants.studentId, studentId)))
-      .limit(1);
-
-    if (existing.length > 0) {
-      return;
-    }
-
+  async assignStudentGrant(
+    teacherId: string,
+    studentId: number,
+    accessLevel: "read" | "manage"
+  ): Promise<void> {
     await db.insert(teacherStudentGrants).values({
       teacherId,
-      studentId
+      studentId,
+      accessLevel
+    }).onDuplicateKeyUpdate({
+      set: {
+        accessLevel
+      }
     });
   },
   async revokeStudentGrant(teacherId: string, studentId: number): Promise<void> {
@@ -755,20 +754,19 @@ const authorizationGrantRepo = {
       .delete(teacherStudentGrants)
       .where(and(eq(teacherStudentGrants.teacherId, teacherId), eq(teacherStudentGrants.studentId, studentId)));
   },
-  async assignClassGrant(teacherId: string, classId: number): Promise<void> {
-    const existing = await db
-      .select({ id: teacherClassGrants.id })
-      .from(teacherClassGrants)
-      .where(and(eq(teacherClassGrants.teacherId, teacherId), eq(teacherClassGrants.classId, classId)))
-      .limit(1);
-
-    if (existing.length > 0) {
-      return;
-    }
-
+  async assignClassGrant(
+    teacherId: string,
+    classId: number,
+    accessLevel: "read" | "manage"
+  ): Promise<void> {
     await db.insert(teacherClassGrants).values({
       teacherId,
-      classId
+      classId,
+      accessLevel
+    }).onDuplicateKeyUpdate({
+      set: {
+        accessLevel
+      }
     });
   },
   async revokeClassGrant(teacherId: string, classId: number): Promise<void> {
