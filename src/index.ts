@@ -53,6 +53,7 @@ import { createRoleModelMatchingService } from "./modules/role-model/matching.js
 import { createReportGenerationService } from "./modules/report/generation.js";
 import { createReportJobSyncService } from "./modules/report/job-sync.js";
 import { createTaskCheckInService } from "./modules/task/checkin.js";
+import { createTeacherMyStudentsService } from "./modules/teacher/my-students.js";
 import { createEnrollmentProfileService } from "./modules/enrollment/profile.js";
 import { createExcelImportValidationService } from "./modules/import/excel-validation.js";
 import { createCertificateUploadService } from "./modules/upload/certificate-upload.js";
@@ -61,6 +62,7 @@ import { createAuthRoutes } from "./routes/auth.js";
 import healthRoutes from "./routes/health.js";
 import { createResourcesRoutes } from "./routes/resources.js";
 import { createStudentRoutes } from "./routes/student.js";
+import { createTeacherRoutes } from "./routes/teacher.js";
 
 const studentRepo = {
   async findStudentByNo(studentNo: string) {
@@ -377,6 +379,138 @@ const taskCheckInRepo = {
 
 const taskCheckInService = createTaskCheckInService({
   taskCheckInRepo
+});
+
+const teacherMyStudentsRepo = {
+  async listAuthorizedStudents({ teacherId, page, pageSize, filters }: {
+    teacherId: string;
+    page: number;
+    pageSize: number;
+    filters: {
+      classId?: number;
+      majorId?: number;
+      grade?: number;
+      assessmentStatus?: "done" | "pending";
+      reportStatus?: "generated" | "pending";
+    };
+  }) {
+    const directGrantRows = await db
+      .select({ studentId: teacherStudentGrants.studentId })
+      .from(teacherStudentGrants)
+      .where(eq(teacherStudentGrants.teacherId, teacherId));
+
+    const classGrantRows = await db
+      .select({ classId: teacherClassGrants.classId })
+      .from(teacherClassGrants)
+      .where(eq(teacherClassGrants.teacherId, teacherId));
+
+    const classIds = new Set<number>(classGrantRows.map((item) => item.classId));
+    const classStudentRows =
+      classGrantRows.length > 0
+        ? (await db
+            .select({ studentId: students.id, classId: students.classId })
+            .from(students))
+            .filter((row) => classIds.has(row.classId))
+            .map((row) => ({ studentId: row.studentId }))
+        : [];
+
+    const authorizedStudentIdSet = new Set<number>([
+      ...directGrantRows.map((item) => item.studentId),
+      ...classStudentRows.map((item) => item.studentId)
+    ]);
+
+    if (authorizedStudentIdSet.size === 0) {
+      return { total: 0, rows: [] };
+    }
+
+    const authorizedStudents = await db
+      .select({
+        studentId: students.id,
+        studentNo: students.studentNo,
+        name: students.name,
+        classId: classes.id,
+        className: classes.name,
+        majorId: classes.majorId,
+        majorName: majors.name
+      })
+      .from(students)
+      .innerJoin(classes, eq(students.classId, classes.id))
+      .leftJoin(majors, eq(classes.majorId, majors.id));
+
+    let rows = authorizedStudents.filter((row) => authorizedStudentIdSet.has(row.studentId));
+
+    if (filters.classId) {
+      rows = rows.filter((row) => row.classId === filters.classId);
+    }
+    if (filters.majorId) {
+      rows = rows.filter((row) => row.majorId === filters.majorId);
+    }
+
+    const studentNoList = rows.map((row) => row.studentNo);
+    const assessmentRows =
+      rows.length > 0
+        ? await db
+            .select({ studentId: assessmentSubmissions.studentId })
+            .from(assessmentSubmissions)
+        : [];
+    const reportRows =
+      rows.length > 0
+        ? await db
+            .select({ studentId: reports.studentId })
+            .from(reports)
+        : [];
+    const enrollmentRows =
+      studentNoList.length > 0
+        ? await db
+            .select({
+              studentNo: enrollmentProfiles.studentNo,
+              grade: enrollmentProfiles.admissionYear
+            })
+            .from(enrollmentProfiles)
+        : [];
+
+    const assessmentDoneSet = new Set<number>(assessmentRows.map((item) => item.studentId));
+    const reportDoneSet = new Set<number>(reportRows.map((item) => item.studentId));
+    const gradeByStudentNo = new Map<string, number | null>(
+      enrollmentRows.map((item) => [item.studentNo, item.grade])
+    );
+
+    let enrichedRows = rows.map((row) => ({
+      ...row,
+      grade: gradeByStudentNo.get(row.studentNo) ?? null,
+      assessmentDone: assessmentDoneSet.has(row.studentId),
+      reportGenerated: reportDoneSet.has(row.studentId)
+    }));
+
+    if (filters.grade) {
+      enrichedRows = enrichedRows.filter((row) => row.grade === filters.grade);
+    }
+    if (filters.assessmentStatus) {
+      enrichedRows = enrichedRows.filter((row) =>
+        filters.assessmentStatus === "done" ? row.assessmentDone : !row.assessmentDone
+      );
+    }
+    if (filters.reportStatus) {
+      enrichedRows = enrichedRows.filter((row) =>
+        filters.reportStatus === "generated" ? row.reportGenerated : !row.reportGenerated
+      );
+    }
+
+    enrichedRows.sort((left, right) => left.studentId - right.studentId);
+
+    const total = enrichedRows.length;
+    const offset = (page - 1) * pageSize;
+    const pagedRows = enrichedRows.slice(offset, offset + pageSize);
+
+    return {
+      total,
+      rows: pagedRows
+    };
+  }
+};
+
+const teacherMyStudentsService = createTeacherMyStudentsService({
+  teacherMyStudentsRepo
 });
 
 const requireStudentAuth = createStudentAuthMiddleware({
@@ -975,6 +1109,12 @@ app.route(
   })
 );
 app.route("/resources", createResourcesRoutes({ createResourceAuthorization }));
+app.route(
+  "/teacher",
+  createTeacherRoutes({
+    teacherMyStudentsService
+  })
+);
 app.route(
   "/student",
   createStudentRoutes({
