@@ -296,6 +296,45 @@ export const activities = mysqlTable(
   })
 );
 
+export const teacherActivityAssignments = mysqlTable(
+  "teacher_activity_assignments",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    activityId: int("activity_id")
+      .notNull()
+      .references(() => activities.id),
+    teacherId: varchar("teacher_id", { length: 64 }).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull()
+  },
+  (table) => ({
+    activityTeacherUnique: uniqueIndex("teacher_activity_assignments_activity_teacher_unique").on(
+      table.activityId,
+      table.teacherId
+    ),
+    teacherIdIdx: index("teacher_activity_assignments_teacher_id_idx").on(table.teacherId)
+  })
+);
+
+export const activityExecutionRecords = mysqlTable(
+  "activity_execution_records",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    activityId: int("activity_id")
+      .notNull()
+      .references(() => activities.id),
+    teacherId: varchar("teacher_id", { length: 64 }).notNull(),
+    payloadJson: text("payload_json").notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull()
+  },
+  (table) => ({
+    activityTeacherUnique: uniqueIndex("activity_execution_records_activity_teacher_unique").on(
+      table.activityId,
+      table.teacherId
+    ),
+    teacherIdIdx: index("activity_execution_records_teacher_id_idx").on(table.teacherId)
+  })
+);
+
 export const auditLogs = mysqlTable(
   "audit_logs",
   {
