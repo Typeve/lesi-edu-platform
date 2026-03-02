@@ -48,6 +48,7 @@ import { createStudentFirstLoginVerificationService } from "./modules/auth/first
 import { createLikertAssessmentService } from "./modules/assessment/likert.js";
 import { createLikertAssessmentResultService } from "./modules/assessment/result.js";
 import { createRoleModelMatchingService } from "./modules/role-model/matching.js";
+import { createReportGenerationService } from "./modules/report/generation.js";
 import { createEnrollmentProfileService } from "./modules/enrollment/profile.js";
 import { createExcelImportValidationService } from "./modules/import/excel-validation.js";
 import { createCertificateUploadService } from "./modules/upload/certificate-upload.js";
@@ -279,6 +280,8 @@ const roleModelMatchingRepo = {
 const roleModelMatchingService = createRoleModelMatchingService({
   roleModelRepo: roleModelMatchingRepo
 });
+
+const reportGenerationService = createReportGenerationService();
 
 const requireStudentAuth = createStudentAuthMiddleware({
   tokenVerifier: createJwtTokenVerifier({
@@ -883,7 +886,8 @@ app.route(
     certificateUploadService,
     likertAssessmentService,
     likertAssessmentResultService,
-    roleModelMatchingService
+    roleModelMatchingService,
+    reportGenerationService
   })
 );
 

@@ -19,6 +19,7 @@ import {
   type RoleModelDirection,
   type RoleModelMatchingService
 } from "../modules/role-model/matching.js";
+import type { ReportGenerationService } from "../modules/report/generation.js";
 
 export interface StudentRouteDependencies {
   requireStudentAuth: MiddlewareHandler;
@@ -26,6 +27,7 @@ export interface StudentRouteDependencies {
   likertAssessmentService?: Pick<LikertAssessmentService, "getQuestions" | "submitAnswers">;
   likertAssessmentResultService?: Pick<LikertAssessmentResultService, "getResult">;
   roleModelMatchingService?: Pick<RoleModelMatchingService, "matchRoleModels">;
+  reportGenerationService?: Pick<ReportGenerationService, "generateAllReports">;
 }
 
 const isUploadedFile = (value: unknown): value is UploadedFile => {
@@ -77,6 +79,11 @@ export const createStudentRoutes = ({
   roleModelMatchingService = {
     async matchRoleModels() {
       throw new Error("roleModelMatchingService is not configured");
+    }
+  },
+  reportGenerationService = {
+    async generateAllReports() {
+      throw new Error("reportGenerationService is not configured");
     }
   }
 }: StudentRouteDependencies) => {
@@ -173,6 +180,25 @@ export const createStudentRoutes = ({
 
       throw error;
     }
+  });
+
+  student.post("/reports/generate", requireStudentAuth, async (c) => {
+    const studentAuth = c.get("studentAuth");
+    if (!studentAuth) {
+      return c.json({ message: "unauthorized" }, 401);
+    }
+
+    const assessmentResult = await likertAssessmentResultService.getResult({
+      studentId: studentAuth.studentId
+    });
+
+    const generated = await reportGenerationService.generateAllReports({
+      studentNo: studentAuth.studentNo,
+      dimensionScores: assessmentResult.dimensionScores,
+      recommendation: assessmentResult.recommendation
+    });
+
+    return c.json(generated, 200);
   });
 
   student.post("/certificates/upload", requireStudentAuth, async (c) => {
