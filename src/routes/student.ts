@@ -14,12 +14,18 @@ import {
   LikertAssessmentResultNotFoundError,
   type LikertAssessmentResultService
 } from "../modules/assessment/result.js";
+import {
+  RoleModelMatchingNotFoundError,
+  type RoleModelDirection,
+  type RoleModelMatchingService
+} from "../modules/role-model/matching.js";
 
 export interface StudentRouteDependencies {
   requireStudentAuth: MiddlewareHandler;
   certificateUploadService: CertificateUploadService;
   likertAssessmentService?: Pick<LikertAssessmentService, "getQuestions" | "submitAnswers">;
   likertAssessmentResultService?: Pick<LikertAssessmentResultService, "getResult">;
+  roleModelMatchingService?: Pick<RoleModelMatchingService, "matchRoleModels">;
 }
 
 const isUploadedFile = (value: unknown): value is UploadedFile => {
@@ -66,6 +72,11 @@ export const createStudentRoutes = ({
   likertAssessmentResultService = {
     async getResult() {
       throw new Error("likertAssessmentResultService is not configured");
+    }
+  },
+  roleModelMatchingService = {
+    async matchRoleModels() {
+      throw new Error("roleModelMatchingService is not configured");
     }
   }
 }: StudentRouteDependencies) => {
@@ -130,6 +141,34 @@ export const createStudentRoutes = ({
     } catch (error) {
       if (error instanceof LikertAssessmentResultNotFoundError) {
         return c.json({ message: "assessment submission not found" }, 404);
+      }
+
+      throw error;
+    }
+  });
+
+  student.get("/role-models/match", requireStudentAuth, async (c) => {
+    const studentAuth = c.get("studentAuth");
+    if (!studentAuth) {
+      return c.json({ message: "unauthorized" }, 401);
+    }
+
+    const directionInput = c.req.query("direction");
+    const direction: RoleModelDirection =
+      directionInput === "postgraduate" || directionInput === "civil_service"
+        ? directionInput
+        : "employment";
+
+    try {
+      const result = await roleModelMatchingService.matchRoleModels({
+        studentNo: studentAuth.studentNo,
+        direction
+      });
+
+      return c.json(result, 200);
+    } catch (error) {
+      if (error instanceof RoleModelMatchingNotFoundError) {
+        return c.json({ message: "student enrollment profile not found" }, 404);
       }
 
       throw error;
