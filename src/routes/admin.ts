@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { ActivityService, ActivityType } from "../modules/activity/service.js";
 import type { AuditLogService } from "../modules/audit/service.js";
-import type { AuthorizationGrantService, GrantType } from "../modules/authorization/grant-service.js";
+import type { AccessLevel, AuthorizationGrantService, GrantType } from "../modules/authorization/grant-service.js";
 import {
   type DashboardDimension,
   type DashboardDimensionAggregationService,
@@ -32,6 +32,11 @@ interface AdminGrantRequestBody {
   grantType: GrantType;
   teacherId: string;
   targetId: number;
+  accessLevel?: AccessLevel;
+}
+
+interface AdminBatchGrantBody {
+  grants: AdminGrantRequestBody[];
 }
 
 interface AdminPublishActivityRequestBody {
@@ -126,6 +131,10 @@ const isValidGrantType = (grantType: unknown): grantType is GrantType => {
   return grantType === "student" || grantType === "class";
 };
 
+const isValidAccessLevel = (accessLevel: unknown): accessLevel is AccessLevel => {
+  return accessLevel === "read" || accessLevel === "manage";
+};
+
 const parsePositiveInteger = (rawId: string): number | null => {
   if (!/^[1-9]\d*$/.test(rawId)) {
     return null;
@@ -156,8 +165,26 @@ const isValidGrantBody = (body: unknown): body is AdminGrantRequestBody => {
   const grantType = (body as { grantType?: unknown }).grantType;
   const teacherId = (body as { teacherId?: unknown }).teacherId;
   const targetId = parseTargetId((body as { targetId?: unknown }).targetId);
+  const accessLevel = (body as { accessLevel?: unknown }).accessLevel;
+  const hasValidAccessLevel =
+    accessLevel === undefined || accessLevel === null || isValidAccessLevel(accessLevel);
 
-  return isValidGrantType(grantType) && typeof teacherId === "string" && teacherId.trim().length > 0 && !!targetId;
+  return (
+    isValidGrantType(grantType) &&
+    typeof teacherId === "string" &&
+    teacherId.trim().length > 0 &&
+    !!targetId &&
+    hasValidAccessLevel
+  );
+};
+
+const isValidBatchGrantBody = (body: unknown): body is AdminBatchGrantBody => {
+  if (!body || typeof body !== "object") {
+    return false;
+  }
+
+  const grants = (body as { grants?: unknown }).grants;
+  return Array.isArray(grants) && grants.length > 0 && grants.every((grant) => isValidGrantBody(grant));
 };
 
 const isValidActivityType = (activityType: unknown): activityType is ActivityType => {
@@ -628,7 +655,8 @@ export const createAdminRoutes = ({
     await authorizationGrantService.assignGrant({
       grantType: body.grantType,
       teacherId: body.teacherId.trim(),
-      targetId: body.targetId
+      targetId: body.targetId,
+      accessLevel: body.accessLevel ?? "read"
     });
 
     await auditLogService.logAuthorizationGrant({
@@ -674,6 +702,81 @@ export const createAdminRoutes = ({
     });
 
     return c.json({ message: "authorization revoked" }, 200);
+  });
+
+  admin.post("/authorizations/grants/batch", async (c) => {
+    const requestAdminKey = c.req.header("x-admin-key");
+    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
+      return c.json({ message: "forbidden" }, 403);
+    }
+
+    const operator = resolveOperator(c.req.header("x-admin-operator-id"));
+
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ message: "invalid request body" }, 400);
+    }
+
+    if (!isValidBatchGrantBody(body)) {
+      return c.json({ message: "grants is required and must be valid array" }, 400);
+    }
+
+    for (const grant of body.grants) {
+      await authorizationGrantService.assignGrant({
+        grantType: grant.grantType,
+        teacherId: grant.teacherId.trim(),
+        targetId: grant.targetId,
+        accessLevel: grant.accessLevel ?? "read"
+      });
+
+      await auditLogService.logAuthorizationGrant({
+        operator,
+        teacherId: grant.teacherId.trim(),
+        grantType: grant.grantType,
+        targetId: grant.targetId
+      });
+    }
+
+    return c.json({ message: "authorization granted", count: body.grants.length }, 200);
+  });
+
+  admin.delete("/authorizations/grants/batch", async (c) => {
+    const requestAdminKey = c.req.header("x-admin-key");
+    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
+      return c.json({ message: "forbidden" }, 403);
+    }
+
+    const operator = resolveOperator(c.req.header("x-admin-operator-id"));
+
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ message: "invalid request body" }, 400);
+    }
+
+    if (!isValidBatchGrantBody(body)) {
+      return c.json({ message: "grants is required and must be valid array" }, 400);
+    }
+
+    for (const grant of body.grants) {
+      await authorizationGrantService.revokeGrant({
+        grantType: grant.grantType,
+        teacherId: grant.teacherId.trim(),
+        targetId: grant.targetId
+      });
+
+      await auditLogService.logAuthorizationRevoke({
+        operator,
+        teacherId: grant.teacherId.trim(),
+        grantType: grant.grantType,
+        targetId: grant.targetId
+      });
+    }
+
+    return c.json({ message: "authorization revoked", count: body.grants.length }, 200);
   });
 
   admin.post("/activities", async (c) => {

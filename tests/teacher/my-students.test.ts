@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { Hono } from "hono";
 import { createTeacherMyStudentsService, type TeacherMyStudentsRepository } from "../../src/modules/teacher/my-students.ts";
+import { createAuthorizationGrantService } from "../../src/modules/authorization/grant-service.ts";
 import { createTeacherRoutes } from "../../src/routes/teacher.ts";
 
 test("teacher my students service should keep stable pagination order by studentId", async () => {
@@ -136,4 +137,83 @@ test("GET /teacher/my-students should support filters and pagination", async () 
   const payload = await response.json();
   assert.equal(payload.total, 1);
   assert.equal(payload.items[0].studentNo, "S20260012");
+});
+
+test("teacher visible students should be affected immediately after grant and revoke", async () => {
+  const teacherId = "T-1";
+  const classGrants = new Set<number>();
+  const studentsByClass = new Map<number, number[]>([
+    [10, [1001, 1002]]
+  ]);
+
+  const grantService = createAuthorizationGrantService({
+    authorizationGrantRepo: {
+      async assignStudentGrant() {},
+      async revokeStudentGrant() {},
+      async assignClassGrant(_teacherId, classId) {
+        classGrants.add(classId);
+      },
+      async revokeClassGrant(_teacherId, classId) {
+        classGrants.delete(classId);
+      }
+    }
+  });
+
+  const service = createTeacherMyStudentsService({
+    teacherMyStudentsRepo: {
+      async listAuthorizedStudents(query) {
+        assert.equal(query.teacherId, teacherId);
+        const rows = Array.from(classGrants).flatMap((classId) =>
+          (studentsByClass.get(classId) ?? []).map((studentId) => ({
+            studentId,
+            studentNo: `S${studentId}`,
+            name: `学生${studentId}`,
+            classId,
+            className: `${classId}班`,
+            majorId: null,
+            majorName: null,
+            grade: 2024,
+            assessmentDone: false,
+            reportGenerated: false
+          }))
+        );
+        return { total: rows.length, rows };
+      }
+    }
+  });
+
+  const beforeGrant = await service.getMyStudents({
+    teacherId,
+    page: 1,
+    pageSize: 20,
+    filters: {}
+  });
+  assert.equal(beforeGrant.total, 0);
+
+  await grantService.assignGrant({
+    grantType: "class",
+    teacherId,
+    targetId: 10,
+    accessLevel: "manage"
+  });
+  const afterGrant = await service.getMyStudents({
+    teacherId,
+    page: 1,
+    pageSize: 20,
+    filters: {}
+  });
+  assert.equal(afterGrant.total, 2);
+
+  await grantService.revokeGrant({
+    grantType: "class",
+    teacherId,
+    targetId: 10
+  });
+  const afterRevoke = await service.getMyStudents({
+    teacherId,
+    page: 1,
+    pageSize: 20,
+    filters: {}
+  });
+  assert.equal(afterRevoke.total, 0);
 });

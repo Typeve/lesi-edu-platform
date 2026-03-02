@@ -66,7 +66,9 @@ test("schema should include resource and grant authorization tables", () => {
   assert.equal(certificates.studentId.name, "student_id");
   assert.equal(profiles.studentId.name, "student_id");
   assert.equal(teacherStudentGrants.teacherId.name, "teacher_id");
+  assert.equal(teacherStudentGrants.accessLevel.name, "access_level");
   assert.equal(teacherClassGrants.classId.name, "class_id");
+  assert.equal(teacherClassGrants.accessLevel.name, "access_level");
 });
 
 test("schema should include activity and audit log tables", () => {

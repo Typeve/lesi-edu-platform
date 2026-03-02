@@ -251,6 +251,7 @@ export const teacherStudentGrants = mysqlTable(
     studentId: int("student_id")
       .notNull()
       .references(() => students.id),
+    accessLevel: mysqlEnum("access_level", ["read", "manage"]).notNull().default("read"),
     createdAt: timestamp("created_at").defaultNow().notNull()
   },
   (table) => ({
@@ -271,6 +272,7 @@ export const teacherClassGrants = mysqlTable(
     classId: int("class_id")
       .notNull()
       .references(() => classes.id),
+    accessLevel: mysqlEnum("access_level", ["read", "manage"]).notNull().default("read"),
     createdAt: timestamp("created_at").defaultNow().notNull()
   },
   (table) => ({
