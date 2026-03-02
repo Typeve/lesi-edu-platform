@@ -883,6 +883,84 @@ const teacherAccountService = {
   }
 };
 
+const adminStudentArchiveService = {
+  async createStudentArchive({ classId, studentNo, name }: { classId: number; studentNo: string; name: string }) {
+    const inserted = await db
+      .insert(students)
+      .values({
+        classId,
+        studentNo,
+        name,
+        mustChangePassword: true
+      });
+    return { studentId: Number(inserted[0].insertId) };
+  },
+  async getStudentArchive({ studentId }: { studentId: number }) {
+    const rows = await db
+      .select({
+        studentId: students.id,
+        studentNo: students.studentNo,
+        name: students.name,
+        classId: students.classId
+      })
+      .from(students)
+      .where(eq(students.id, studentId))
+      .limit(1);
+    return rows[0] ?? null;
+  },
+  async updateStudentArchive({ studentId, name, classId }: { studentId: number; name?: string; classId?: number }) {
+    const patch: { name?: string; classId?: number } = {};
+    if (name) {
+      patch.name = name;
+    }
+    if (classId) {
+      patch.classId = classId;
+    }
+    if (Object.keys(patch).length === 0) {
+      return;
+    }
+    await db
+      .update(students)
+      .set(patch)
+      .where(eq(students.id, studentId));
+  },
+  async deleteStudentArchive({ studentId }: { studentId: number }) {
+    await db.delete(students).where(eq(students.id, studentId));
+  },
+  async getEnrollmentLinkStatus({ studentId }: { studentId: number }) {
+    const studentRows = await db
+      .select({
+        studentNo: students.studentNo
+      })
+      .from(students)
+      .where(eq(students.id, studentId))
+      .limit(1);
+    const studentNo = studentRows[0]?.studentNo;
+    if (!studentNo) {
+      return { status: "missing" as const, reason: "student not found" };
+    }
+
+    if (!/^S\d{6,}$/.test(studentNo)) {
+      return { status: "abnormal" as const, reason: "abnormal student_no format" };
+    }
+
+    const linkedRows = await db
+      .select({
+        id: enrollmentProfiles.id
+      })
+      .from(enrollmentProfiles)
+      .where(eq(enrollmentProfiles.studentNo, studentNo));
+
+    if (linkedRows.length === 0) {
+      return { status: "missing" as const, reason: "missing in enrollment source" };
+    }
+    if (linkedRows.length > 1) {
+      return { status: "duplicate" as const, reason: "duplicate student_no in enrollment source" };
+    }
+    return { status: "linked" as const, reason: null };
+  }
+};
+
 const excelImportValidationService = createExcelImportValidationService();
 const dashboardSlowQueryObserver = createDashboardSlowQueryObserver({
   slowQueryThresholdMs: env.METRICS_SLOW_QUERY_THRESHOLD_MS
@@ -1297,6 +1375,7 @@ app.route(
     dashboardTrendFunnelService,
     adminOrgService,
     teacherAccountService,
+    adminStudentArchiveService,
     adminApiKey: env.ADMIN_API_KEY
   })
 );
