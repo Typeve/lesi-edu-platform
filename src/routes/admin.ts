@@ -277,6 +277,29 @@ const parsePositiveIntegerQuery = (raw: string | undefined): number | undefined 
   return Number.isSafeInteger(parsed) ? parsed : null;
 };
 
+const resolveDashboardFiltersFromQuery = (
+  query: (key: string) => string | undefined
+): { filters: DashboardFilters | null; hasInvalid: boolean } => {
+  const schoolId = parsePositiveIntegerQuery(query("schoolId"));
+  const collegeId = parsePositiveIntegerQuery(query("collegeId"));
+  const majorId = parsePositiveIntegerQuery(query("majorId"));
+  const classId = parsePositiveIntegerQuery(query("classId"));
+
+  if ([schoolId, collegeId, majorId, classId].some((value) => value === null)) {
+    return { filters: null, hasInvalid: true };
+  }
+
+  return {
+    hasInvalid: false,
+    filters: {
+      schoolId: schoolId as number | undefined,
+      collegeId: collegeId as number | undefined,
+      majorId: majorId as number | undefined,
+      classId: classId as number | undefined
+    }
+  };
+};
+
 const DASHBOARD_DATE_QUERY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 const isValidDateOnly = (rawDate: string): boolean => {
@@ -943,21 +966,10 @@ export const createAdminRoutes = ({
       return c.json({ message: "dimension must be college/major/class" }, 400);
     }
 
-    const schoolId = parsePositiveIntegerQuery(c.req.query("schoolId"));
-    const collegeId = parsePositiveIntegerQuery(c.req.query("collegeId"));
-    const majorId = parsePositiveIntegerQuery(c.req.query("majorId"));
-    const classId = parsePositiveIntegerQuery(c.req.query("classId"));
-
-    if ([schoolId, collegeId, majorId, classId].some((value) => value === null)) {
+    const { filters, hasInvalid } = resolveDashboardFiltersFromQuery((key) => c.req.query(key));
+    if (hasInvalid || !filters) {
       return c.json({ message: "organization filter must be positive integer" }, 400);
     }
-
-    const filters: DashboardFilters = {
-      schoolId: schoolId as number | undefined,
-      collegeId: collegeId as number | undefined,
-      majorId: majorId as number | undefined,
-      classId: classId as number | undefined
-    };
 
     const result = await dashboardDimensionAggregationService.aggregateByDimension({
       dimension: dimensionQuery,
@@ -973,12 +985,8 @@ export const createAdminRoutes = ({
       return c.json({ message: "forbidden" }, 403);
     }
 
-    const schoolId = parsePositiveIntegerQuery(c.req.query("schoolId"));
-    const collegeId = parsePositiveIntegerQuery(c.req.query("collegeId"));
-    const majorId = parsePositiveIntegerQuery(c.req.query("majorId"));
-    const classId = parsePositiveIntegerQuery(c.req.query("classId"));
-
-    if ([schoolId, collegeId, majorId, classId].some((value) => value === null)) {
+    const { filters, hasInvalid } = resolveDashboardFiltersFromQuery((key) => c.req.query(key));
+    if (hasInvalid || !filters) {
       return c.json({ message: "organization filter must be positive integer" }, 400);
     }
 
@@ -993,13 +1001,6 @@ export const createAdminRoutes = ({
       return c.json({ message: "startDate must be less than or equal to endDate" }, 400);
     }
 
-    const filters: DashboardFilters = {
-      schoolId: schoolId as number | undefined,
-      collegeId: collegeId as number | undefined,
-      majorId: majorId as number | undefined,
-      classId: classId as number | undefined
-    };
-
     try {
       const result = await dashboardTrendFunnelService.getTrendAndFunnel({
         filters,
@@ -1013,6 +1014,68 @@ export const createAdminRoutes = ({
         return c.json({ message: error.message }, 400);
       }
 
+      throw error;
+    }
+  });
+
+  admin.get("/dashboard/cockpit", async (c) => {
+    const requestAdminKey = c.req.header("x-admin-key");
+    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
+      return c.json({ message: "forbidden" }, 403);
+    }
+
+    const dimensionQuery = c.req.query("dimension");
+    const dimension: DashboardDimension = isDashboardDimension(dimensionQuery)
+      ? dimensionQuery
+      : "college";
+
+    const { filters, hasInvalid } = resolveDashboardFiltersFromQuery((key) => c.req.query(key));
+    if (hasInvalid || !filters) {
+      return c.json({ message: "organization filter must be positive integer" }, 400);
+    }
+
+    const startDate = c.req.query("startDate");
+    const endDate = c.req.query("endDate");
+
+    if ((startDate && !isValidDateOnly(startDate)) || (endDate && !isValidDateOnly(endDate))) {
+      return c.json({ message: "startDate/endDate must be YYYY-MM-DD" }, 400);
+    }
+
+    if (startDate && endDate && startDate > endDate) {
+      return c.json({ message: "startDate must be less than or equal to endDate" }, 400);
+    }
+
+    try {
+      const [aggregation, trendFunnel] = await Promise.all([
+        dashboardDimensionAggregationService.aggregateByDimension({
+          dimension,
+          filters
+        }),
+        dashboardTrendFunnelService.getTrendAndFunnel({
+          filters,
+          startDate,
+          endDate
+        })
+      ]);
+
+      return c.json(
+        {
+          dictionaryVersion: aggregation.dictionaryVersion,
+          filters,
+          overview: aggregation.metricCards,
+          byDimension: {
+            dimension: aggregation.dimension,
+            barChart: aggregation.barChart,
+            stackedBarChart: aggregation.stackedBarChart
+          },
+          trendFunnel
+        },
+        200
+      );
+    } catch (error) {
+      if (error instanceof InvalidDashboardDateRangeError) {
+        return c.json({ message: error.message }, 400);
+      }
       throw error;
     }
   });
