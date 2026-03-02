@@ -39,6 +39,26 @@ interface AdminPublishActivityRequestBody {
   title: string;
 }
 
+interface AdminCollegeCreateBody {
+  schoolId: number;
+  name: string;
+}
+
+interface AdminCollegeUpdateBody {
+  name: string;
+}
+
+interface AdminTeacherCreateBody {
+  name: string;
+  account: string;
+  password: string;
+  status: "active" | "frozen";
+}
+
+interface AdminTeacherStatusBody {
+  status: "active" | "frozen";
+}
+
 export interface AdminRouteDependencies {
   studentAuthService: Pick<StudentAuthService, "resetStudentPasswordByAdmin">;
   authorizationGrantService: Pick<AuthorizationGrantService, "assignGrant" | "revokeGrant">;
@@ -53,6 +73,21 @@ export interface AdminRouteDependencies {
     "aggregateByDimension"
   >;
   dashboardTrendFunnelService?: Pick<DashboardTrendFunnelService, "getTrendAndFunnel">;
+  adminOrgService?: {
+    createCollege(input: { schoolId: number; name: string }): Promise<{ collegeId: number }>;
+    updateCollege(input: { collegeId: number; name: string }): Promise<void>;
+    deleteCollege(input: { collegeId: number }): Promise<void>;
+  };
+  teacherAccountService?: {
+    createTeacherAccount(input: {
+      name: string;
+      account: string;
+      password: string;
+      status: "active" | "frozen";
+    }): Promise<{ teacherId: string }>;
+    updateTeacherStatus(input: { teacherId: string; status: "active" | "frozen" }): Promise<void>;
+    resetTeacherPassword(input: { teacherId: string; newPassword: string }): Promise<void>;
+  };
   adminApiKey: string;
 }
 
@@ -232,6 +267,30 @@ const defaultDashboardTrendFunnelService: Pick<DashboardTrendFunnelService, "get
   }
 };
 
+const defaultAdminOrgService: NonNullable<AdminRouteDependencies["adminOrgService"]> = {
+  async createCollege() {
+    throw new Error("adminOrgService is not configured");
+  },
+  async updateCollege() {
+    throw new Error("adminOrgService is not configured");
+  },
+  async deleteCollege() {
+    throw new Error("adminOrgService is not configured");
+  }
+};
+
+const defaultTeacherAccountService: NonNullable<AdminRouteDependencies["teacherAccountService"]> = {
+  async createTeacherAccount() {
+    throw new Error("teacherAccountService is not configured");
+  },
+  async updateTeacherStatus() {
+    throw new Error("teacherAccountService is not configured");
+  },
+  async resetTeacherPassword() {
+    throw new Error("teacherAccountService is not configured");
+  }
+};
+
 export const createAdminRoutes = ({
   studentAuthService,
   authorizationGrantService,
@@ -240,6 +299,8 @@ export const createAdminRoutes = ({
   excelImportValidationService = defaultExcelImportValidationService,
   dashboardDimensionAggregationService = defaultDashboardDimensionAggregationService,
   dashboardTrendFunnelService = defaultDashboardTrendFunnelService,
+  adminOrgService = defaultAdminOrgService,
+  teacherAccountService = defaultTeacherAccountService,
   adminApiKey
 }: AdminRouteDependencies) => {
   const admin = new Hono();
@@ -292,6 +353,130 @@ export const createAdminRoutes = ({
 
       throw error;
     }
+  });
+
+  admin.post("/org/colleges", async (c) => {
+    const requestAdminKey = c.req.header("x-admin-key");
+    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
+      return c.json({ message: "forbidden" }, 403);
+    }
+
+    const body = (await c.req.json().catch(() => null)) as AdminCollegeCreateBody | null;
+    if (!body || !Number.isInteger(body.schoolId) || body.schoolId <= 0 || !body.name?.trim()) {
+      return c.json({ message: "invalid request body" }, 400);
+    }
+
+    const result = await adminOrgService.createCollege({
+      schoolId: body.schoolId,
+      name: body.name.trim()
+    });
+    return c.json(result, 200);
+  });
+
+  admin.patch("/org/colleges/:id", async (c) => {
+    const requestAdminKey = c.req.header("x-admin-key");
+    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
+      return c.json({ message: "forbidden" }, 403);
+    }
+
+    const collegeId = parsePositiveInteger(c.req.param("id"));
+    const body = (await c.req.json().catch(() => null)) as AdminCollegeUpdateBody | null;
+    if (!collegeId || !body?.name?.trim()) {
+      return c.json({ message: "invalid request body" }, 400);
+    }
+
+    await adminOrgService.updateCollege({ collegeId, name: body.name.trim() });
+    return c.json({ message: "ok" }, 200);
+  });
+
+  admin.delete("/org/colleges/:id", async (c) => {
+    const requestAdminKey = c.req.header("x-admin-key");
+    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
+      return c.json({ message: "forbidden" }, 403);
+    }
+    const collegeId = parsePositiveInteger(c.req.param("id"));
+    if (!collegeId) {
+      return c.json({ message: "invalid college id" }, 400);
+    }
+
+    await adminOrgService.deleteCollege({ collegeId });
+    return c.json({ message: "ok" }, 200);
+  });
+
+  admin.post("/teachers", async (c) => {
+    const requestAdminKey = c.req.header("x-admin-key");
+    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
+      return c.json({ message: "forbidden" }, 403);
+    }
+
+    const body = (await c.req.json().catch(() => null)) as AdminTeacherCreateBody | null;
+    if (
+      !body ||
+      !body.name?.trim() ||
+      !body.account?.trim() ||
+      !body.password ||
+      (body.status !== "active" && body.status !== "frozen")
+    ) {
+      return c.json({ message: "invalid request body" }, 400);
+    }
+
+    const result = await teacherAccountService.createTeacherAccount({
+      name: body.name.trim(),
+      account: body.account.trim(),
+      password: body.password,
+      status: body.status
+    });
+    await auditLogService.logActivityPublish({
+      operator: resolveOperator(c.req.header("x-admin-operator-id")),
+      activityType: "course",
+      title: `teacher_create:${result.teacherId}`
+    });
+    return c.json(result, 200);
+  });
+
+  admin.patch("/teachers/:id/status", async (c) => {
+    const requestAdminKey = c.req.header("x-admin-key");
+    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
+      return c.json({ message: "forbidden" }, 403);
+    }
+    const teacherId = c.req.param("id");
+    const body = (await c.req.json().catch(() => null)) as AdminTeacherStatusBody | null;
+    if (!teacherId?.trim() || !body || (body.status !== "active" && body.status !== "frozen")) {
+      return c.json({ message: "invalid request body" }, 400);
+    }
+
+    await teacherAccountService.updateTeacherStatus({
+      teacherId: teacherId.trim(),
+      status: body.status
+    });
+    await auditLogService.logActivityPublish({
+      operator: resolveOperator(c.req.header("x-admin-operator-id")),
+      activityType: "course",
+      title: `teacher_status:${teacherId}:${body.status}`
+    });
+    return c.json({ message: "ok" }, 200);
+  });
+
+  admin.post("/teachers/:id/reset-password", async (c) => {
+    const requestAdminKey = c.req.header("x-admin-key");
+    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
+      return c.json({ message: "forbidden" }, 403);
+    }
+    const teacherId = c.req.param("id")?.trim();
+    const body = (await c.req.json().catch(() => null)) as { newPassword?: string } | null;
+    if (!teacherId || !body?.newPassword || body.newPassword.length < 8) {
+      return c.json({ message: "invalid request body" }, 400);
+    }
+
+    await teacherAccountService.resetTeacherPassword({
+      teacherId,
+      newPassword: body.newPassword
+    });
+    await auditLogService.logPasswordReset({
+      operator: resolveOperator(c.req.header("x-admin-operator-id")),
+      targetStudentId: 0
+    });
+    return c.json({ message: "ok" }, 200);
   });
 
   admin.post("/authorizations/grants", async (c) => {

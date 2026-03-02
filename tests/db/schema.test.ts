@@ -20,6 +20,7 @@ import {
   students,
   taskCheckIns,
   tasks,
+  teachers,
   teacherActivityAssignments,
   teacherClassGrants,
   teacherStudentGrants
@@ -133,4 +134,11 @@ test("schema should include teacher activity execution tables", () => {
   assert.equal(activityExecutionRecords[Symbol.for("drizzle:Name")], "activity_execution_records");
   assert.equal(teacherActivityAssignments.activityId.name, "activity_id");
   assert.equal(activityExecutionRecords.payloadJson.name, "payload_json");
+});
+
+test("schema should include teachers account table", () => {
+  assert.equal(teachers[Symbol.for("drizzle:Name")], "teachers");
+  assert.equal(teachers.teacherId.name, "teacher_id");
+  assert.equal(teachers.account.name, "account");
+  assert.equal(teachers.status.name, "status");
 });
