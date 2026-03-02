@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   assessmentSubmissions,
+  activityExecutionRecords,
   activities,
   authScopes,
   auditLogs,
@@ -19,6 +20,7 @@ import {
   students,
   taskCheckIns,
   tasks,
+  teacherActivityAssignments,
   teacherClassGrants,
   teacherStudentGrants
 } from "../../src/db/schema.ts";
@@ -124,4 +126,11 @@ test("schema should include task_check_ins table for check-in flow", () => {
   assert.equal(taskCheckIns.studentId.name, "student_id");
   assert.equal(taskCheckIns.fileId.name, "file_id");
   assert.equal(taskCheckIns.note.name, "note");
+});
+
+test("schema should include teacher activity execution tables", () => {
+  assert.equal(teacherActivityAssignments[Symbol.for("drizzle:Name")], "teacher_activity_assignments");
+  assert.equal(activityExecutionRecords[Symbol.for("drizzle:Name")], "activity_execution_records");
+  assert.equal(teacherActivityAssignments.activityId.name, "activity_id");
+  assert.equal(activityExecutionRecords.payloadJson.name, "payload_json");
 });

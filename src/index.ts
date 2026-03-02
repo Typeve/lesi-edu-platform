@@ -6,6 +6,7 @@ import { env } from "./config/env.js";
 import { db } from "./db/client.js";
 import {
   assessmentSubmissions,
+  activityExecutionRecords,
   activities,
   auditLogs,
   certificateFiles,
@@ -20,6 +21,7 @@ import {
   students,
   taskCheckIns,
   tasks,
+  teacherActivityAssignments,
   teacherClassGrants,
   teacherStudentGrants
 } from "./db/schema.js";
@@ -53,6 +55,7 @@ import { createRoleModelMatchingService } from "./modules/role-model/matching.js
 import { createReportGenerationService } from "./modules/report/generation.js";
 import { createReportJobSyncService } from "./modules/report/job-sync.js";
 import { createTaskCheckInService } from "./modules/task/checkin.js";
+import { createTeacherActivityExecutionService } from "./modules/teacher/activity-execution.js";
 import { createTeacherMyStudentsService } from "./modules/teacher/my-students.js";
 import { createTeacherStudentDetailService } from "./modules/teacher/student-detail.js";
 import { createEnrollmentProfileService } from "./modules/enrollment/profile.js";
@@ -590,6 +593,59 @@ const teacherStudentDetailRepo = {
 
 const teacherStudentDetailService = createTeacherStudentDetailService({
   teacherStudentDetailRepo
+});
+
+const teacherActivityExecutionRepo = {
+  async isTeacherAssigned(teacherId: string, activityId: number) {
+    const rows = await db
+      .select({ id: teacherActivityAssignments.id })
+      .from(teacherActivityAssignments)
+      .where(
+        and(
+          eq(teacherActivityAssignments.teacherId, teacherId),
+          eq(teacherActivityAssignments.activityId, activityId)
+        )
+      )
+      .limit(1);
+    return rows.length > 0;
+  },
+  async upsertExecutionRecord({ teacherId, activityId, payloadJson, updatedAt }: {
+    teacherId: string;
+    activityId: number;
+    payloadJson: string;
+    updatedAt: Date;
+  }) {
+    const existing = await db
+      .select({ id: activityExecutionRecords.id })
+      .from(activityExecutionRecords)
+      .where(
+        and(eq(activityExecutionRecords.teacherId, teacherId), eq(activityExecutionRecords.activityId, activityId))
+      )
+      .limit(1);
+
+    if (existing[0]) {
+      await db
+        .update(activityExecutionRecords)
+        .set({
+          payloadJson,
+          updatedAt
+        })
+        .where(eq(activityExecutionRecords.id, existing[0].id));
+      return existing[0].id;
+    }
+
+    const inserted = await db.insert(activityExecutionRecords).values({
+      teacherId,
+      activityId,
+      payloadJson,
+      updatedAt
+    });
+    return Number(inserted[0].insertId);
+  }
+};
+
+const teacherActivityExecutionService = createTeacherActivityExecutionService({
+  teacherActivityExecutionRepo
 });
 
 const requireStudentAuth = createStudentAuthMiddleware({
@@ -1192,7 +1248,8 @@ app.route(
   "/teacher",
   createTeacherRoutes({
     teacherMyStudentsService,
-    teacherStudentDetailService
+    teacherStudentDetailService,
+    teacherActivityExecutionService
   })
 );
 app.route(

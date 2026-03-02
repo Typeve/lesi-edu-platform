@@ -9,10 +9,15 @@ import {
   TeacherStudentDetailNotFoundError,
   type TeacherStudentDetailService
 } from "../modules/teacher/student-detail.js";
+import {
+  TeacherActivityForbiddenError,
+  type TeacherActivityExecutionService
+} from "../modules/teacher/activity-execution.js";
 
 export interface TeacherRouteDependencies {
   teacherMyStudentsService: Pick<TeacherMyStudentsService, "getMyStudents">;
   teacherStudentDetailService?: Pick<TeacherStudentDetailService, "getStudentDetail">;
+  teacherActivityExecutionService?: Pick<TeacherActivityExecutionService, "executeActivity">;
 }
 
 const parsePositiveInteger = (raw: string | undefined): number | undefined => {
@@ -44,6 +49,11 @@ export const createTeacherRoutes = ({
   teacherStudentDetailService = {
     async getStudentDetail() {
       throw new Error("teacherStudentDetailService is not configured");
+    }
+  },
+  teacherActivityExecutionService = {
+    async executeActivity() {
+      throw new Error("teacherActivityExecutionService is not configured");
     }
   }
 }: TeacherRouteDependencies) => {
@@ -97,6 +107,39 @@ export const createTeacherRoutes = ({
       }
       if (error instanceof TeacherStudentDetailNotFoundError) {
         return c.json({ message: "student not found" }, 404);
+      }
+      throw error;
+    }
+  });
+
+  teacher.post("/activities/:id/execute", async (c) => {
+    const teacherId = c.req.header("x-teacher-id")?.trim();
+    if (!teacherId) {
+      return c.json({ message: "teacher id required" }, 401);
+    }
+
+    const activityId = Number.parseInt(c.req.param("id"), 10);
+    if (!Number.isInteger(activityId) || activityId <= 0) {
+      return c.json({ message: "invalid activity id" }, 400);
+    }
+
+    let payload: unknown;
+    try {
+      payload = await c.req.json();
+    } catch {
+      return c.json({ message: "invalid request body" }, 400);
+    }
+
+    try {
+      const result = await teacherActivityExecutionService.executeActivity({
+        teacherId,
+        activityId,
+        payload
+      });
+      return c.json(result, 200);
+    } catch (error) {
+      if (error instanceof TeacherActivityForbiddenError) {
+        return c.json({ message: "forbidden" }, 403);
       }
       throw error;
     }

@@ -85,6 +85,13 @@
       "when": 1772417310063,
       "tag": "0011_task_check_ins",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1772418082248,
+      "tag": "0012_teacher_activity_execution",
+      "breakpoints": true
     }
   ]
 }
