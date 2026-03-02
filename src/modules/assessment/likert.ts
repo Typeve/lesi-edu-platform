@@ -68,9 +68,9 @@ export class InvalidLikertAnswersError extends Error {
   }
 }
 
-const LIKERT_QUESTION_COUNT = 50;
+export const LIKERT_QUESTION_COUNT = 50;
 
-const LIKERT_QUESTIONS: LikertQuestion[] = [
+export const LIKERT_QUESTIONS: LikertQuestion[] = [
   { questionId: 1, content: "我会主动关注就业与升学相关信息。", dimension: "interest" },
   { questionId: 2, content: "我愿意持续投入时间探索未来职业方向。", dimension: "interest" },
   { questionId: 3, content: "我对参加职业体验活动有较强兴趣。", dimension: "interest" },
