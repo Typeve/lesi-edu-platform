@@ -10,11 +10,16 @@ import {
   InvalidLikertAnswersError,
   type LikertAssessmentService
 } from "../modules/assessment/likert.js";
+import {
+  LikertAssessmentResultNotFoundError,
+  type LikertAssessmentResultService
+} from "../modules/assessment/result.js";
 
 export interface StudentRouteDependencies {
   requireStudentAuth: MiddlewareHandler;
   certificateUploadService: CertificateUploadService;
   likertAssessmentService?: Pick<LikertAssessmentService, "getQuestions" | "submitAnswers">;
+  likertAssessmentResultService?: Pick<LikertAssessmentResultService, "getResult">;
 }
 
 const isUploadedFile = (value: unknown): value is UploadedFile => {
@@ -56,6 +61,11 @@ export const createStudentRoutes = ({
     },
     async submitAnswers() {
       throw new Error("likertAssessmentService is not configured");
+    }
+  },
+  likertAssessmentResultService = {
+    async getResult() {
+      throw new Error("likertAssessmentResultService is not configured");
     }
   }
 }: StudentRouteDependencies) => {
@@ -100,6 +110,26 @@ export const createStudentRoutes = ({
     } catch (error) {
       if (error instanceof InvalidLikertAnswersError) {
         return c.json({ message: error.message }, 400);
+      }
+
+      throw error;
+    }
+  });
+
+  student.get("/assessments/result", requireStudentAuth, async (c) => {
+    const studentAuth = c.get("studentAuth");
+    if (!studentAuth) {
+      return c.json({ message: "unauthorized" }, 401);
+    }
+
+    try {
+      const result = await likertAssessmentResultService.getResult({
+        studentId: studentAuth.studentId
+      });
+      return c.json(result, 200);
+    } catch (error) {
+      if (error instanceof LikertAssessmentResultNotFoundError) {
+        return c.json({ message: "assessment submission not found" }, 404);
       }
 
       throw error;

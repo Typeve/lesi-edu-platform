@@ -46,6 +46,7 @@ import { createStudentAuthService } from "./modules/auth/service.js";
 import { createJwtTokenSigner, createJwtTokenVerifier } from "./modules/auth/token.js";
 import { createStudentFirstLoginVerificationService } from "./modules/auth/first-login-verification.js";
 import { createLikertAssessmentService } from "./modules/assessment/likert.js";
+import { createLikertAssessmentResultService } from "./modules/assessment/result.js";
 import { createEnrollmentProfileService } from "./modules/enrollment/profile.js";
 import { createExcelImportValidationService } from "./modules/import/excel-validation.js";
 import { createCertificateUploadService } from "./modules/upload/certificate-upload.js";
@@ -227,6 +228,10 @@ const likertAssessmentSubmissionRepo = {
 
 const likertAssessmentService = createLikertAssessmentService({
   submissionRepo: likertAssessmentSubmissionRepo
+});
+
+const likertAssessmentResultService = createLikertAssessmentResultService({
+  resultRepo: likertAssessmentSubmissionRepo
 });
 
 const requireStudentAuth = createStudentAuthMiddleware({
@@ -830,7 +835,8 @@ app.route(
   createStudentRoutes({
     requireStudentAuth,
     certificateUploadService,
-    likertAssessmentService
+    likertAssessmentService,
+    likertAssessmentResultService
   })
 );
 
