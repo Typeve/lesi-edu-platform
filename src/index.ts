@@ -1,5 +1,5 @@
 import { serve } from "@hono/node-server";
-import { and, eq, gte, lt } from "drizzle-orm";
+import { and, eq, gte, lt, ne } from "drizzle-orm";
 import { Hono } from "hono";
 import path from "node:path";
 import { env } from "./config/env.js";
@@ -47,6 +47,7 @@ import { createJwtTokenSigner, createJwtTokenVerifier } from "./modules/auth/tok
 import { createStudentFirstLoginVerificationService } from "./modules/auth/first-login-verification.js";
 import { createLikertAssessmentService } from "./modules/assessment/likert.js";
 import { createLikertAssessmentResultService } from "./modules/assessment/result.js";
+import { createRoleModelMatchingService } from "./modules/role-model/matching.js";
 import { createEnrollmentProfileService } from "./modules/enrollment/profile.js";
 import { createExcelImportValidationService } from "./modules/import/excel-validation.js";
 import { createCertificateUploadService } from "./modules/upload/certificate-upload.js";
@@ -232,6 +233,51 @@ const likertAssessmentService = createLikertAssessmentService({
 
 const likertAssessmentResultService = createLikertAssessmentResultService({
   resultRepo: likertAssessmentSubmissionRepo
+});
+
+const roleModelMatchingRepo = {
+  async findStudentEnrollmentProfile(studentNo: string) {
+    const records = await db
+      .select({
+        studentNo: enrollmentProfiles.studentNo,
+        schoolName: enrollmentProfiles.schoolName,
+        majorName: enrollmentProfiles.majorName,
+        score: enrollmentProfiles.score
+      })
+      .from(enrollmentProfiles)
+      .where(eq(enrollmentProfiles.studentNo, studentNo))
+      .limit(1);
+
+    return records[0] ?? null;
+  },
+  async listRoleModelCandidates(direction: "employment" | "postgraduate" | "civil_service") {
+    const records = await db
+      .select({
+        studentNo: enrollmentProfiles.studentNo,
+        name: enrollmentProfiles.name,
+        schoolName: enrollmentProfiles.schoolName,
+        majorName: enrollmentProfiles.majorName,
+        score: enrollmentProfiles.score,
+        direction: reports.direction
+      })
+      .from(enrollmentProfiles)
+      .innerJoin(students, eq(students.studentNo, enrollmentProfiles.studentNo))
+      .innerJoin(reports, and(eq(reports.studentId, students.id), eq(reports.direction, direction)))
+      .where(ne(students.studentNo, ""));
+
+    return records.map((record) => ({
+      studentNo: record.studentNo,
+      name: record.name ?? "匿名榜样",
+      schoolName: record.schoolName,
+      majorName: record.majorName,
+      score: record.score,
+      direction: record.direction
+    }));
+  }
+};
+
+const roleModelMatchingService = createRoleModelMatchingService({
+  roleModelRepo: roleModelMatchingRepo
 });
 
 const requireStudentAuth = createStudentAuthMiddleware({
@@ -836,7 +882,8 @@ app.route(
     requireStudentAuth,
     certificateUploadService,
     likertAssessmentService,
-    likertAssessmentResultService
+    likertAssessmentResultService,
+    roleModelMatchingService
   })
 );
 
