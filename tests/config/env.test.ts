@@ -43,6 +43,22 @@ test("env validation should reject placeholder secret values", () => {
   );
 });
 
+test("env validation should allow short jwt secret", () => {
+  const output = runEnvModule({
+    JWT_SECRET: "short-secret"
+  });
+
+  assert.match(output, /ENV_OK/);
+});
+
+test("env validation should allow short admin api key", () => {
+  const output = runEnvModule({
+    ADMIN_API_KEY: "short-admin-key"
+  });
+
+  assert.match(output, /ENV_OK/);
+});
+
 test("env validation should reject unsupported metrics cache invalidation strategy", () => {
   assert.throws(
     () =>

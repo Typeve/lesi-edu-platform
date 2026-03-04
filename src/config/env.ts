@@ -19,7 +19,6 @@ for (const key of REQUIRED_KEYS) {
   }
 }
 
-const MIN_SECRET_LENGTH = 32;
 const PLACEHOLDER_VALUES = new Set([
   "replace_with_long_random_secret",
   "replace_with_admin_api_key"
@@ -61,10 +60,6 @@ const validateSecretLike = (name: "JWT_SECRET" | "ADMIN_API_KEY", value: string)
 
   if (PLACEHOLDER_VALUES.has(trimmed)) {
     throw new Error(`Invalid environment variable: ${name} cannot use placeholder value`);
-  }
-
-  if (trimmed.length < MIN_SECRET_LENGTH) {
-    throw new Error(`Invalid environment variable: ${name} must be at least ${MIN_SECRET_LENGTH} characters`);
   }
 
   return trimmed;
