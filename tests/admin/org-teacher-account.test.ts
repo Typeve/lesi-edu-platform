@@ -3,6 +3,15 @@ import assert from "node:assert/strict";
 import { Hono } from "hono";
 import { createAdminRoutes } from "../../src/routes/admin.ts";
 
+const requireAdminPermission = () => {
+  return async (c: { req: { header(name: string): string | undefined }; json: Function }, next: () => Promise<void>) => {
+    if (c.req.header("x-admin-key") !== "admin-key") {
+      return c.json({ message: "forbidden" }, 403);
+    }
+    await next();
+  };
+};
+
 const baseDependencies = {
   studentAuthService: {
     async resetStudentPasswordByAdmin() {
@@ -36,7 +45,8 @@ const baseDependencies = {
       return;
     }
   },
-  adminApiKey: "admin-key"
+  adminApiKey: "admin-key",
+  requirePermission: requireAdminPermission
 } as const;
 
 test("admin org CRUD should require admin key", async () => {

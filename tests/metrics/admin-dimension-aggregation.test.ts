@@ -5,6 +5,16 @@ import { createAdminRoutes } from "../../src/routes/admin.ts";
 
 const adminApiKey = "admin-secret-key";
 
+const requireAdminPermission = () => {
+  return async (c: { req: { header(name: string): string | undefined }; json: Function }, next: () => Promise<void>) => {
+    const requestAdminKey = c.req.header("x-admin-key") ?? c.req.header("X-Admin-Key");
+    if (requestAdminKey !== adminApiKey) {
+      return c.json({ message: "forbidden" }, 403);
+    }
+    await next();
+  };
+};
+
 interface CallSnapshot {
   dimension: string;
   schoolId?: number;
@@ -88,7 +98,8 @@ const createApp = (calls: CallSnapshot[] = []) => {
           };
         }
       },
-      adminApiKey
+      adminApiKey,
+      requirePermission: requireAdminPermission
     })
   );
 

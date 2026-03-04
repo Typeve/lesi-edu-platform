@@ -37,6 +37,20 @@ const createApp = (fixture: AuthorizationFixture) => {
   });
 
   const app = new Hono();
+  app.use("/resources/*", async (c, next) => {
+    const teacherId = c.req.header("x-teacher-id") ?? c.req.header("X-Teacher-Id");
+    if (!teacherId) {
+      return c.json({ message: "unauthorized" }, 401);
+    }
+
+    c.set("auth", {
+      sub: teacherId,
+      role: "teacher",
+      account: teacherId,
+      teacherId
+    });
+    await next();
+  });
 
   app.route(
     "/resources",
@@ -44,7 +58,8 @@ const createApp = (fixture: AuthorizationFixture) => {
       createResourceAuthorization: (resourceType) =>
         createResourceAuthorizationMiddleware({
           resourceType,
-          authorizationService: service
+          authorizationService: service,
+          hasPermission: () => true
         })
     })
   );

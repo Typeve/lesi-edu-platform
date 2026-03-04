@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { and, eq, gte, lt, ne } from "drizzle-orm";
-import { Hono } from "hono";
+import { Hono, type Context, type Next } from "hono";
 import path from "node:path";
 import { env } from "./config/env.js";
 import { db } from "./db/client.js";
@@ -26,6 +26,10 @@ import {
   teacherClassGrants,
   teacherStudentGrants
 } from "./db/schema.js";
+import {
+  createRequireAuthMiddleware,
+  createRequirePermissionFactory
+} from "./middleware/auth-session.js";
 import { createStudentAuthMiddleware } from "./middleware/auth.js";
 import { createResourceAuthorizationMiddleware } from "./middleware/resource-authorization.js";
 import { createActivityService } from "./modules/activity/service.js";
@@ -46,9 +50,18 @@ import {
   type DashboardTrendFunnelQueryInput
 } from "./modules/metrics/trend-funnel.js";
 import { createResourceAuthorizationService, type ResourceType } from "./modules/authorization/service.js";
+import { hasPermissionByRole } from "./modules/authorization/rbac.js";
 import { bcryptPasswordHasher, bcryptPasswordVerifier } from "./modules/auth/password.js";
+import { createRefreshTokenSigner, createRefreshTokenVerifier } from "./modules/auth/refresh-token.js";
+import { createSessionAuthService, type RefreshTokenRecord } from "./modules/auth/session-service.js";
 import { createStudentAuthService } from "./modules/auth/service.js";
+import { createJwtAuthTokenSigner, createJwtAuthTokenVerifier } from "./modules/auth/session-token.js";
 import { createJwtTokenSigner, createJwtTokenVerifier } from "./modules/auth/token.js";
+import {
+  UnifiedAuthFrozenError,
+  UnifiedAuthUnauthorizedError,
+  createUnifiedAuthService
+} from "./modules/auth/unified-service.js";
 import { createStudentFirstLoginVerificationService } from "./modules/auth/first-login-verification.js";
 import { createLikertAssessmentService } from "./modules/assessment/likert.js";
 import { createLikertAssessmentResultService } from "./modules/assessment/result.js";
@@ -119,6 +132,24 @@ const studentRepo = {
   }
 };
 
+const authTokenSigner = createJwtAuthTokenSigner({
+  secret: env.JWT_SECRET,
+  expiresInDays: env.JWT_EXPIRES_IN_DAYS
+});
+
+const authTokenVerifier = createJwtAuthTokenVerifier({
+  secret: env.JWT_SECRET
+});
+
+const refreshTokenSigner = createRefreshTokenSigner({
+  secret: env.JWT_SECRET,
+  expiresInDays: 30
+});
+
+const refreshTokenVerifier = createRefreshTokenVerifier({
+  secret: env.JWT_SECRET
+});
+
 const studentAuthService = createStudentAuthService({
   studentRepo,
   passwordVerifier: bcryptPasswordVerifier,
@@ -127,6 +158,296 @@ const studentAuthService = createStudentAuthService({
     secret: env.JWT_SECRET,
     expiresInDays: env.JWT_EXPIRES_IN_DAYS
   })
+});
+
+const unifiedAuthRepo = {
+  async findByRoleAndAccount(role: "student" | "teacher", account: string) {
+    if (role === "student") {
+      const rows = await db
+        .select({
+          id: students.id,
+          studentNo: students.studentNo,
+          name: students.name,
+          passwordHash: students.passwordHash,
+          mustChangePassword: students.mustChangePassword,
+          classId: classes.id,
+          majorId: classes.majorId,
+          collegeId: colleges.id,
+          schoolId: colleges.schoolId
+        })
+        .from(students)
+        .innerJoin(classes, eq(students.classId, classes.id))
+        .innerJoin(colleges, eq(classes.collegeId, colleges.id))
+        .where(eq(students.studentNo, account))
+        .limit(1);
+
+      if (!rows[0]) {
+        return null;
+      }
+
+      return {
+        role,
+        subjectId: String(rows[0].id),
+        account: rows[0].studentNo,
+        displayName: rows[0].name,
+        passwordHash: rows[0].passwordHash,
+        status: "active" as const,
+        mustChangePassword: rows[0].mustChangePassword,
+        studentId: rows[0].id,
+        studentNo: rows[0].studentNo,
+        scope: {
+          schoolId: rows[0].schoolId,
+          collegeId: rows[0].collegeId,
+          majorId: rows[0].majorId ?? undefined,
+          classId: rows[0].classId
+        }
+      };
+    }
+
+    const rows = await db
+      .select({
+        teacherId: teachers.teacherId,
+        name: teachers.name,
+        account: teachers.account,
+        passwordHash: teachers.passwordHash,
+        status: teachers.status
+      })
+      .from(teachers)
+      .where(eq(teachers.account, account))
+      .limit(1);
+
+    if (!rows[0]) {
+      return null;
+    }
+
+    const status: "active" | "frozen" = rows[0].status === "active" ? "active" : "frozen";
+
+    return {
+      role,
+      subjectId: rows[0].teacherId,
+      account: rows[0].account,
+      displayName: rows[0].name,
+      passwordHash: rows[0].passwordHash,
+      status,
+      mustChangePassword: false,
+      teacherId: rows[0].teacherId,
+      scope: {}
+    };
+  },
+  async findByRoleAndSubjectId(role: "student" | "teacher", subjectId: string) {
+    if (role === "student") {
+      const studentId = Number.parseInt(subjectId, 10);
+      if (!Number.isInteger(studentId) || studentId <= 0) {
+        return null;
+      }
+
+      const rows = await db
+        .select({
+          id: students.id,
+          studentNo: students.studentNo,
+          name: students.name,
+          passwordHash: students.passwordHash,
+          mustChangePassword: students.mustChangePassword,
+          classId: classes.id,
+          majorId: classes.majorId,
+          collegeId: colleges.id,
+          schoolId: colleges.schoolId
+        })
+        .from(students)
+        .innerJoin(classes, eq(students.classId, classes.id))
+        .innerJoin(colleges, eq(classes.collegeId, colleges.id))
+        .where(eq(students.id, studentId))
+        .limit(1);
+
+      if (!rows[0]) {
+        return null;
+      }
+
+      return {
+        role,
+        subjectId: String(rows[0].id),
+        account: rows[0].studentNo,
+        displayName: rows[0].name,
+        passwordHash: rows[0].passwordHash,
+        status: "active" as const,
+        mustChangePassword: rows[0].mustChangePassword,
+        studentId: rows[0].id,
+        studentNo: rows[0].studentNo,
+        scope: {
+          schoolId: rows[0].schoolId,
+          collegeId: rows[0].collegeId,
+          majorId: rows[0].majorId ?? undefined,
+          classId: rows[0].classId
+        }
+      };
+    }
+
+    const rows = await db
+      .select({
+        teacherId: teachers.teacherId,
+        name: teachers.name,
+        account: teachers.account,
+        passwordHash: teachers.passwordHash,
+        status: teachers.status
+      })
+      .from(teachers)
+      .where(eq(teachers.teacherId, subjectId))
+      .limit(1);
+
+    if (!rows[0]) {
+      return null;
+    }
+
+    const status: "active" | "frozen" = rows[0].status === "active" ? "active" : "frozen";
+
+    return {
+      role,
+      subjectId: rows[0].teacherId,
+      account: rows[0].account,
+      displayName: rows[0].name,
+      passwordHash: rows[0].passwordHash,
+      status,
+      mustChangePassword: false,
+      teacherId: rows[0].teacherId,
+      scope: {}
+    };
+  },
+  async updatePassword({
+    role,
+    subjectId,
+    passwordHash,
+    mustChangePassword
+  }: {
+    role: "student" | "teacher";
+    subjectId: string;
+    passwordHash: string;
+    mustChangePassword: boolean;
+  }) {
+    if (role === "student") {
+      const studentId = Number.parseInt(subjectId, 10);
+      if (!Number.isInteger(studentId) || studentId <= 0) {
+        return;
+      }
+
+      await db
+        .update(students)
+        .set({
+          passwordHash,
+          passwordUpdatedAt: new Date(),
+          mustChangePassword
+        })
+        .where(eq(students.id, studentId));
+      return;
+    }
+
+    await db
+      .update(teachers)
+      .set({
+        passwordHash
+      })
+      .where(eq(teachers.teacherId, subjectId));
+  }
+};
+
+const unifiedAuthService = createUnifiedAuthService({
+  authRepo: unifiedAuthRepo,
+  passwordVerifier: bcryptPasswordVerifier,
+  passwordHasher: bcryptPasswordHasher,
+  tokenSigner: authTokenSigner,
+  adminAccount: {
+    account: "admin",
+    password: env.ADMIN_API_KEY
+  }
+});
+
+const refreshTokenStore = new Map<
+  string,
+  {
+    auth: import("./modules/auth/session-token.js").AuthTokenPayload;
+    expiresAt: Date;
+    revokedAt: Date | null;
+    createdAt: Date;
+  }
+>();
+
+const sessionAuthService = createSessionAuthService({
+  authenticator: {
+    async loginByAccount(account, password) {
+      const normalizedAccount = account.trim();
+      let frozenError: UnifiedAuthFrozenError | null = null;
+
+      for (const role of ["admin", "teacher", "student"] as const) {
+        try {
+          const loginResult = await unifiedAuthService.login({
+            role,
+            account: normalizedAccount,
+            password
+          });
+
+          const verifiedPayload = authTokenVerifier.verifyAuthToken(loginResult.token);
+          if (!verifiedPayload) {
+            throw new UnifiedAuthUnauthorizedError();
+          }
+
+          return verifiedPayload;
+        } catch (error) {
+          if (error instanceof UnifiedAuthFrozenError) {
+            frozenError = error;
+            continue;
+          }
+
+          if (error instanceof UnifiedAuthUnauthorizedError) {
+            continue;
+          }
+
+          throw error;
+        }
+      }
+
+      if (frozenError) {
+        throw frozenError;
+      }
+
+      throw new UnifiedAuthUnauthorizedError();
+    }
+  },
+  authTokenSigner,
+  authTokenVerifier,
+  refreshTokenSigner,
+  refreshTokenVerifier,
+  refreshTokenRepo: {
+    async save(record: RefreshTokenRecord) {
+      refreshTokenStore.set(record.tokenHash, {
+        auth: record.auth,
+        expiresAt: record.expiresAt,
+        revokedAt: record.revokedAt,
+        createdAt: record.createdAt
+      });
+    },
+    async findByTokenHash(tokenHash) {
+      const found = refreshTokenStore.get(tokenHash);
+      if (!found) {
+        return null;
+      }
+      return {
+        tokenHash,
+        auth: found.auth,
+        expiresAt: found.expiresAt,
+        revokedAt: found.revokedAt,
+        createdAt: found.createdAt
+      };
+    },
+    async revokeByTokenHash(tokenHash, revokedAt) {
+      const existing = refreshTokenStore.get(tokenHash);
+      if (!existing) {
+        return;
+      }
+      refreshTokenStore.set(tokenHash, {
+        ...existing,
+        revokedAt
+      });
+    }
+  }
 });
 
 const studentFirstLoginVerificationRepo = {
@@ -654,6 +975,28 @@ const requireStudentAuth = createStudentAuthMiddleware({
     secret: env.JWT_SECRET
   }),
   studentRepo
+});
+
+const requireAuth = createRequireAuthMiddleware({
+  tokenVerifier: authTokenVerifier
+});
+
+const hasPermission = ({
+  auth,
+  permission
+}: {
+  auth: import("./modules/auth/session-token.js").AuthTokenPayload;
+  permission: string;
+}): boolean => {
+  return hasPermissionByRole({
+    role: auth.role,
+    permission
+  });
+};
+
+const requirePermission = createRequirePermissionFactory({
+  tokenVerifier: authTokenVerifier,
+  permissionChecker: ({ auth, permission }) => hasPermission({ auth, permission })
 });
 
 const authorizationRepo = {
@@ -1395,11 +1738,26 @@ const certificateUploadService = createCertificateUploadService({
   uploadDir: path.resolve(process.cwd(), "uploads/certificates")
 });
 
-const createResourceAuthorization = (resourceType: ResourceType) =>
-  createResourceAuthorizationMiddleware({
+const createResourceAuthorization = (resourceType: ResourceType) => {
+  const authorizeResource = createResourceAuthorizationMiddleware({
     resourceType,
-    authorizationService: resourceAuthorizationService
+    authorizationService: resourceAuthorizationService,
+    hasPermission: ({ auth, permission }) => hasPermission({ auth, permission })
   });
+
+  return async (c: Context, next: Next) => {
+    let passedAuth = false;
+    await requireAuth(c, async () => {
+      passedAuth = true;
+    });
+
+    if (!passedAuth) {
+      return;
+    }
+
+    await authorizeResource(c, next);
+  };
+};
 
 const app = new Hono();
 
@@ -1417,7 +1775,10 @@ app.route(
     studentAuthService,
     studentFirstLoginVerificationService,
     enrollmentProfileService,
-    requireStudentAuth
+    sessionAuthService,
+    unifiedAuthService,
+    requireStudentAuth,
+    requireAuth
   })
 );
 app.route(
@@ -1433,7 +1794,11 @@ app.route(
     adminOrgService,
     teacherAccountService,
     adminStudentArchiveService,
-    adminApiKey: env.ADMIN_API_KEY
+    requirePermission,
+    resolveOperatorId: (c) => {
+      const auth = c.get("auth");
+      return auth?.sub ?? "system-admin";
+    }
   })
 );
 app.route("/resources", createResourcesRoutes({ createResourceAuthorization }));
@@ -1442,7 +1807,15 @@ app.route(
   createTeacherRoutes({
     teacherMyStudentsService,
     teacherStudentDetailService,
-    teacherActivityExecutionService
+    teacherActivityExecutionService,
+    requirePermission,
+    resolveTeacherId: (c) => {
+      const auth = c.get("auth");
+      if (!auth || auth.role !== "teacher") {
+        return null;
+      }
+      return auth.teacherId ?? null;
+    }
   })
 );
 app.route(

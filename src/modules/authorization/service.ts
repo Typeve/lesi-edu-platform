@@ -19,6 +19,9 @@ export type ResourceAuthorizationDecision =
   | { status: "forbidden"; studentId: number };
 
 export interface ResourceAuthorizationService {
+  findResourceStudentId(
+    input: Pick<AuthorizeTeacherResourceInput, "resourceType" | "resourceId">
+  ): Promise<number | null>;
   authorizeTeacherResource(
     input: AuthorizeTeacherResourceInput
   ): Promise<ResourceAuthorizationDecision>;
@@ -32,6 +35,9 @@ export const createResourceAuthorizationService = ({
   authorizationRepo
 }: CreateResourceAuthorizationServiceInput): ResourceAuthorizationService => {
   return {
+    async findResourceStudentId({ resourceType, resourceId }) {
+      return authorizationRepo.findResourceStudentId(resourceType, resourceId);
+    },
     async authorizeTeacherResource({
       teacherId,
       resourceType,

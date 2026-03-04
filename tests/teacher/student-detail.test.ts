@@ -8,6 +8,13 @@ import {
 } from "../../src/modules/teacher/student-detail.ts";
 import { createTeacherRoutes } from "../../src/routes/teacher.ts";
 
+const resolveTeacherIdFromLegacyHeader = (request: {
+  req: { header(name: string): string | undefined };
+}): string | null => {
+  const teacherId = request.req.header("x-teacher-id")?.trim();
+  return teacherId?.length ? teacherId : null;
+};
+
 test("teacher student detail service should aggregate profile/assessment/report/task/certificate", async () => {
   const repo: TeacherStudentDetailRepository = {
     async isStudentAuthorized() {
@@ -93,7 +100,8 @@ test("GET /teacher/students/:id/detail should return 403 when unauthorized", asy
         async getStudentDetail() {
           throw new TeacherStudentDetailForbiddenError();
         }
-      }
+      },
+      resolveTeacherId: resolveTeacherIdFromLegacyHeader
     })
   );
 
@@ -124,7 +132,8 @@ test("GET /teacher/students/:id/detail should return aggregated detail", async (
             certificateFiles: [{ fileId: "f1", originalName: "a.pdf", mimeType: "application/pdf", sizeBytes: 1 }]
           };
         }
-      }
+      },
+      resolveTeacherId: resolveTeacherIdFromLegacyHeader
     })
   );
 

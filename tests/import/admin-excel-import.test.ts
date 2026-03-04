@@ -11,6 +11,16 @@ import {
 
 const adminApiKey = "admin-secret-key";
 
+const requireAdminPermission = () => {
+  return async (c: { req: { header(name: string): string | undefined }; json: Function }, next: () => Promise<void>) => {
+    const requestAdminKey = c.req.header("x-admin-key") ?? c.req.header("X-Admin-Key");
+    if (requestAdminKey !== adminApiKey) {
+      return c.json({ message: "forbidden" }, 403);
+    }
+    await next();
+  };
+};
+
 interface Fixture {
   calls: Array<{ datasetType: "enrollment" | "employment" }>;
 }
@@ -57,7 +67,8 @@ const createNoopAdminApp = (
         }
       },
       excelImportValidationService,
-      adminApiKey
+      adminApiKey,
+      requirePermission: requireAdminPermission
     })
   );
 

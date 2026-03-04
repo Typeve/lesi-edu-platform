@@ -13,6 +13,22 @@ interface ActivityFlowStore {
 
 const adminApiKey = "admin-secret-key";
 
+const requireAdminPermission = () => {
+  return async (c: { req: { header(name: string): string | undefined }; json: Function }, next: () => Promise<void>) => {
+    if (c.req.header("x-admin-key") !== adminApiKey) {
+      return c.json({ message: "forbidden" }, 403);
+    }
+    await next();
+  };
+};
+
+const resolveTeacherIdFromLegacyHeader = (request: {
+  req: { header(name: string): string | undefined };
+}): string | null => {
+  const teacherId = request.req.header("x-teacher-id")?.trim();
+  return teacherId?.length ? teacherId : null;
+};
+
 const buildApp = (store: ActivityFlowStore) => {
   const app = new Hono();
 
@@ -56,7 +72,7 @@ const buildApp = (store: ActivityFlowStore) => {
           return;
         }
       },
-      adminApiKey
+      requirePermission: requireAdminPermission
     })
   );
 
@@ -82,7 +98,8 @@ const buildApp = (store: ActivityFlowStore) => {
           store.executionRecords.push({ activityId: input.activityId, teacherId: input.teacherId });
           return { recordId: store.executionRecords.length, status: "submitted" as const };
         }
-      }
+      },
+      resolveTeacherId: resolveTeacherIdFromLegacyHeader
     })
   );
 

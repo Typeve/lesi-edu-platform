@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context, type MiddlewareHandler } from "hono";
 import type {
   ActivityScopeType,
   ActivityService,
@@ -126,7 +126,9 @@ export interface AdminRouteDependencies {
       reason: string | null;
     }>;
   };
-  adminApiKey: string;
+  requirePermission?: (permission: string) => MiddlewareHandler;
+  resolveOperatorId?: (context: Context) => string;
+  adminApiKey?: string;
 }
 
 const isValidResetPasswordBody = (body: unknown): body is AdminResetPasswordRequestBody => {
@@ -256,8 +258,10 @@ const isValidPublishActivityBody = (body: unknown): body is AdminPublishActivity
   );
 };
 
-const isForbiddenByAdminKey = (requestAdminKey: string | undefined, adminApiKey: string): boolean => {
-  return !requestAdminKey || requestAdminKey !== adminApiKey;
+const passThroughPermission = (): MiddlewareHandler => {
+  return async (_, next) => {
+    await next();
+  };
 };
 
 const isDashboardDimension = (dimension: unknown): dimension is DashboardDimension => {
@@ -390,13 +394,12 @@ const resolveImportFile = (body: Record<string, unknown>): UploadedExcelFile | n
   return isUploadedExcelFile(fileField) ? fileField : null;
 };
 
-const resolveOperator = (rawOperator: string | undefined): string => {
-  if (!rawOperator) {
-    return "system-admin";
+const defaultResolveOperatorId = (context: Context): string => {
+  const auth = context.get("auth");
+  if (auth?.sub) {
+    return auth.sub;
   }
-
-  const operator = rawOperator.trim();
-  return operator.length > 0 ? operator : "system-admin";
+  return "system-admin";
 };
 
 const defaultExcelImportValidationService: Pick<ExcelImportValidationService, "validateExcelImport"> = {
@@ -473,17 +476,13 @@ export const createAdminRoutes = ({
   adminOrgService = defaultAdminOrgService,
   teacherAccountService = defaultTeacherAccountService,
   adminStudentArchiveService = defaultAdminStudentArchiveService,
-  adminApiKey
+  requirePermission = passThroughPermission,
+  resolveOperatorId = defaultResolveOperatorId
 }: AdminRouteDependencies) => {
   const admin = new Hono();
 
-  admin.post("/students/:id/reset-password", async (c) => {
-    const requestAdminKey = c.req.header("x-admin-key");
-    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
-      return c.json({ message: "forbidden" }, 403);
-    }
-
-    const operator = resolveOperator(c.req.header("x-admin-operator-id"));
+  admin.post("/students/:id/reset-password", requirePermission("admin.teacher.manage"), async (c) => {
+    const operator = resolveOperatorId(c);
     const studentId = parsePositiveInteger(c.req.param("id"));
 
     if (!studentId) {
@@ -527,11 +526,7 @@ export const createAdminRoutes = ({
     }
   });
 
-  admin.post("/org/colleges", async (c) => {
-    const requestAdminKey = c.req.header("x-admin-key");
-    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
-      return c.json({ message: "forbidden" }, 403);
-    }
+  admin.post("/org/colleges", requirePermission("admin.org.manage"), async (c) => {
 
     const body = (await c.req.json().catch(() => null)) as AdminCollegeCreateBody | null;
     if (!body || !Number.isInteger(body.schoolId) || body.schoolId <= 0 || !body.name?.trim()) {
@@ -545,11 +540,7 @@ export const createAdminRoutes = ({
     return c.json(result, 200);
   });
 
-  admin.patch("/org/colleges/:id", async (c) => {
-    const requestAdminKey = c.req.header("x-admin-key");
-    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
-      return c.json({ message: "forbidden" }, 403);
-    }
+  admin.patch("/org/colleges/:id", requirePermission("admin.org.manage"), async (c) => {
 
     const collegeId = parsePositiveInteger(c.req.param("id"));
     const body = (await c.req.json().catch(() => null)) as AdminCollegeUpdateBody | null;
@@ -561,11 +552,7 @@ export const createAdminRoutes = ({
     return c.json({ message: "ok" }, 200);
   });
 
-  admin.delete("/org/colleges/:id", async (c) => {
-    const requestAdminKey = c.req.header("x-admin-key");
-    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
-      return c.json({ message: "forbidden" }, 403);
-    }
+  admin.delete("/org/colleges/:id", requirePermission("admin.org.manage"), async (c) => {
     const collegeId = parsePositiveInteger(c.req.param("id"));
     if (!collegeId) {
       return c.json({ message: "invalid college id" }, 400);
@@ -575,11 +562,7 @@ export const createAdminRoutes = ({
     return c.json({ message: "ok" }, 200);
   });
 
-  admin.post("/teachers", async (c) => {
-    const requestAdminKey = c.req.header("x-admin-key");
-    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
-      return c.json({ message: "forbidden" }, 403);
-    }
+  admin.post("/teachers", requirePermission("admin.teacher.manage"), async (c) => {
 
     const body = (await c.req.json().catch(() => null)) as AdminTeacherCreateBody | null;
     if (
@@ -599,18 +582,14 @@ export const createAdminRoutes = ({
       status: body.status
     });
     await auditLogService.logActivityPublish({
-      operator: resolveOperator(c.req.header("x-admin-operator-id")),
+      operator: resolveOperatorId(c),
       activityType: "course",
-      title: `teacher_create:${result.teacherId}`
+      activityTitle: `teacher_create:${result.teacherId}`
     });
     return c.json(result, 200);
   });
 
-  admin.patch("/teachers/:id/status", async (c) => {
-    const requestAdminKey = c.req.header("x-admin-key");
-    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
-      return c.json({ message: "forbidden" }, 403);
-    }
+  admin.patch("/teachers/:id/status", requirePermission("admin.teacher.manage"), async (c) => {
     const teacherId = c.req.param("id");
     const body = (await c.req.json().catch(() => null)) as AdminTeacherStatusBody | null;
     if (!teacherId?.trim() || !body || (body.status !== "active" && body.status !== "frozen")) {
@@ -622,18 +601,14 @@ export const createAdminRoutes = ({
       status: body.status
     });
     await auditLogService.logActivityPublish({
-      operator: resolveOperator(c.req.header("x-admin-operator-id")),
+      operator: resolveOperatorId(c),
       activityType: "course",
-      title: `teacher_status:${teacherId}:${body.status}`
+      activityTitle: `teacher_status:${teacherId}:${body.status}`
     });
     return c.json({ message: "ok" }, 200);
   });
 
-  admin.post("/teachers/:id/reset-password", async (c) => {
-    const requestAdminKey = c.req.header("x-admin-key");
-    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
-      return c.json({ message: "forbidden" }, 403);
-    }
+  admin.post("/teachers/:id/reset-password", requirePermission("admin.teacher.manage"), async (c) => {
     const teacherId = c.req.param("id")?.trim();
     const body = (await c.req.json().catch(() => null)) as { newPassword?: string } | null;
     if (!teacherId || !body?.newPassword || body.newPassword.length < 8) {
@@ -645,17 +620,13 @@ export const createAdminRoutes = ({
       newPassword: body.newPassword
     });
     await auditLogService.logPasswordReset({
-      operator: resolveOperator(c.req.header("x-admin-operator-id")),
-      targetStudentId: 0
+      operator: resolveOperatorId(c),
+      studentId: 0
     });
     return c.json({ message: "ok" }, 200);
   });
 
-  admin.post("/students", async (c) => {
-    const requestAdminKey = c.req.header("x-admin-key");
-    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
-      return c.json({ message: "forbidden" }, 403);
-    }
+  admin.post("/students", requirePermission("admin.org.manage"), async (c) => {
     const body = (await c.req.json().catch(() => null)) as AdminStudentArchiveCreateBody | null;
     if (
       !body ||
@@ -675,11 +646,7 @@ export const createAdminRoutes = ({
     return c.json(result, 200);
   });
 
-  admin.get("/students/:id", async (c) => {
-    const requestAdminKey = c.req.header("x-admin-key");
-    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
-      return c.json({ message: "forbidden" }, 403);
-    }
+  admin.get("/students/:id", requirePermission("admin.org.manage"), async (c) => {
     const studentId = parsePositiveInteger(c.req.param("id"));
     if (!studentId) {
       return c.json({ message: "invalid student id" }, 400);
@@ -691,11 +658,7 @@ export const createAdminRoutes = ({
     return c.json(result, 200);
   });
 
-  admin.patch("/students/:id", async (c) => {
-    const requestAdminKey = c.req.header("x-admin-key");
-    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
-      return c.json({ message: "forbidden" }, 403);
-    }
+  admin.patch("/students/:id", requirePermission("admin.org.manage"), async (c) => {
     const studentId = parsePositiveInteger(c.req.param("id"));
     if (!studentId) {
       return c.json({ message: "invalid student id" }, 400);
@@ -704,19 +667,19 @@ export const createAdminRoutes = ({
     if (!body) {
       return c.json({ message: "invalid request body" }, 400);
     }
+    const classId =
+      Number.isInteger(body.classId) && typeof body.classId === "number" && body.classId > 0
+        ? body.classId
+        : undefined;
     await adminStudentArchiveService.updateStudentArchive({
       studentId,
       name: typeof body.name === "string" ? body.name.trim() : undefined,
-      classId: Number.isInteger(body.classId) && body.classId > 0 ? body.classId : undefined
+      classId
     });
     return c.json({ message: "ok" }, 200);
   });
 
-  admin.delete("/students/:id", async (c) => {
-    const requestAdminKey = c.req.header("x-admin-key");
-    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
-      return c.json({ message: "forbidden" }, 403);
-    }
+  admin.delete("/students/:id", requirePermission("admin.org.manage"), async (c) => {
     const studentId = parsePositiveInteger(c.req.param("id"));
     if (!studentId) {
       return c.json({ message: "invalid student id" }, 400);
@@ -725,11 +688,7 @@ export const createAdminRoutes = ({
     return c.json({ message: "ok" }, 200);
   });
 
-  admin.get("/students/:id/enrollment-link", async (c) => {
-    const requestAdminKey = c.req.header("x-admin-key");
-    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
-      return c.json({ message: "forbidden" }, 403);
-    }
+  admin.get("/students/:id/enrollment-link", requirePermission("admin.org.manage"), async (c) => {
     const studentId = parsePositiveInteger(c.req.param("id"));
     if (!studentId) {
       return c.json({ message: "invalid student id" }, 400);
@@ -738,13 +697,9 @@ export const createAdminRoutes = ({
     return c.json(result, 200);
   });
 
-  admin.post("/authorizations/grants", async (c) => {
-    const requestAdminKey = c.req.header("x-admin-key");
-    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
-      return c.json({ message: "forbidden" }, 403);
-    }
+  admin.post("/authorizations/grants", requirePermission("admin.authorization.manage"), async (c) => {
 
-    const operator = resolveOperator(c.req.header("x-admin-operator-id"));
+    const operator = resolveOperatorId(c);
 
     let body: unknown;
     try {
@@ -774,13 +729,9 @@ export const createAdminRoutes = ({
     return c.json({ message: "authorization granted" }, 200);
   });
 
-  admin.delete("/authorizations/grants", async (c) => {
-    const requestAdminKey = c.req.header("x-admin-key");
-    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
-      return c.json({ message: "forbidden" }, 403);
-    }
+  admin.delete("/authorizations/grants", requirePermission("admin.authorization.manage"), async (c) => {
 
-    const operator = resolveOperator(c.req.header("x-admin-operator-id"));
+    const operator = resolveOperatorId(c);
 
     let body: unknown;
     try {
@@ -809,13 +760,9 @@ export const createAdminRoutes = ({
     return c.json({ message: "authorization revoked" }, 200);
   });
 
-  admin.post("/authorizations/grants/batch", async (c) => {
-    const requestAdminKey = c.req.header("x-admin-key");
-    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
-      return c.json({ message: "forbidden" }, 403);
-    }
+  admin.post("/authorizations/grants/batch", requirePermission("admin.authorization.manage"), async (c) => {
 
-    const operator = resolveOperator(c.req.header("x-admin-operator-id"));
+    const operator = resolveOperatorId(c);
 
     let body: unknown;
     try {
@@ -847,13 +794,9 @@ export const createAdminRoutes = ({
     return c.json({ message: "authorization granted", count: body.grants.length }, 200);
   });
 
-  admin.delete("/authorizations/grants/batch", async (c) => {
-    const requestAdminKey = c.req.header("x-admin-key");
-    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
-      return c.json({ message: "forbidden" }, 403);
-    }
+  admin.delete("/authorizations/grants/batch", requirePermission("admin.authorization.manage"), async (c) => {
 
-    const operator = resolveOperator(c.req.header("x-admin-operator-id"));
+    const operator = resolveOperatorId(c);
 
     let body: unknown;
     try {
@@ -884,13 +827,9 @@ export const createAdminRoutes = ({
     return c.json({ message: "authorization revoked", count: body.grants.length }, 200);
   });
 
-  admin.post("/activities", async (c) => {
-    const requestAdminKey = c.req.header("x-admin-key");
-    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
-      return c.json({ message: "forbidden" }, 403);
-    }
+  admin.post("/activities", requirePermission("admin.activity.publish"), async (c) => {
 
-    const operator = resolveOperator(c.req.header("x-admin-operator-id"));
+    const operator = resolveOperatorId(c);
 
     let body: unknown;
     try {
@@ -923,11 +862,7 @@ export const createAdminRoutes = ({
     return c.json({ message: "activity published" }, 201);
   });
 
-  admin.get("/activities", async (c) => {
-    const requestAdminKey = c.req.header("x-admin-key");
-    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
-      return c.json({ message: "forbidden" }, 403);
-    }
+  admin.get("/activities", requirePermission("admin.activity.publish"), async (c) => {
 
     if (!activityService.listActivities) {
       return c.json({ message: "activity list service not configured" }, 500);
@@ -943,11 +878,7 @@ export const createAdminRoutes = ({
     }, 200);
   });
 
-  admin.post("/imports/excel/validate", async (c) => {
-    const requestAdminKey = c.req.header("x-admin-key");
-    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
-      return c.json({ message: "forbidden" }, 403);
-    }
+  admin.post("/imports/excel/validate", requirePermission("admin.org.manage"), async (c) => {
 
     let body: Record<string, unknown>;
     try {
@@ -983,11 +914,7 @@ export const createAdminRoutes = ({
     }
   });
 
-  admin.get("/dashboard/dimension-aggregation", async (c) => {
-    const requestAdminKey = c.req.header("x-admin-key");
-    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
-      return c.json({ message: "forbidden" }, 403);
-    }
+  admin.get("/dashboard/dimension-aggregation", requirePermission("admin.dashboard.read"), async (c) => {
 
     const dimensionQuery = c.req.query("dimension");
     if (!isDashboardDimension(dimensionQuery)) {
@@ -1007,11 +934,7 @@ export const createAdminRoutes = ({
     return c.json(result, 200);
   });
 
-  admin.get("/dashboard/trend-funnel", async (c) => {
-    const requestAdminKey = c.req.header("x-admin-key");
-    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
-      return c.json({ message: "forbidden" }, 403);
-    }
+  admin.get("/dashboard/trend-funnel", requirePermission("admin.dashboard.read"), async (c) => {
 
     const { filters, hasInvalid } = resolveDashboardFiltersFromQuery((key) => c.req.query(key));
     if (hasInvalid || !filters) {
@@ -1046,11 +969,7 @@ export const createAdminRoutes = ({
     }
   });
 
-  admin.get("/dashboard/cockpit", async (c) => {
-    const requestAdminKey = c.req.header("x-admin-key");
-    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
-      return c.json({ message: "forbidden" }, 403);
-    }
+  admin.get("/dashboard/cockpit", requirePermission("admin.dashboard.read"), async (c) => {
 
     const dimensionQuery = c.req.query("dimension");
     const dimension: DashboardDimension = isDashboardDimension(dimensionQuery)
@@ -1108,11 +1027,7 @@ export const createAdminRoutes = ({
     }
   });
 
-  admin.get("/release/p0-baseline", async (c) => {
-    const requestAdminKey = c.req.header("x-admin-key");
-    if (isForbiddenByAdminKey(requestAdminKey, adminApiKey)) {
-      return c.json({ message: "forbidden" }, 403);
-    }
+  admin.get("/release/p0-baseline", requirePermission("admin.dashboard.read"), async (c) => {
 
     return c.json(
       {

@@ -11,6 +11,15 @@ import {
 
 const adminApiKey = "admin-secret-key";
 
+const requireAdminPermission = () => {
+  return async (c: { req: { header(name: string): string | undefined }; json: Function }, next: () => Promise<void>) => {
+    if (c.req.header("x-admin-key") !== adminApiKey) {
+      return c.json({ message: "forbidden" }, 403);
+    }
+    await next();
+  };
+};
+
 interface TestContext {
   student: StudentAuthRecord | null;
   updateInputs: StudentPasswordUpdateInput[];
@@ -88,7 +97,8 @@ function buildApp(ctx: TestContext): Hono {
           ctx.auditActions.push("activity_publish");
         }
       },
-      adminApiKey
+      adminApiKey,
+      requirePermission: requireAdminPermission
     })
   );
 
