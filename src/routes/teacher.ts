@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context, type MiddlewareHandler } from "hono";
 import type {
   AssessmentStatusFilter,
   ReportStatusFilter,
@@ -18,7 +18,23 @@ export interface TeacherRouteDependencies {
   teacherMyStudentsService: Pick<TeacherMyStudentsService, "getMyStudents">;
   teacherStudentDetailService?: Pick<TeacherStudentDetailService, "getStudentDetail">;
   teacherActivityExecutionService?: Pick<TeacherActivityExecutionService, "executeActivity">;
+  requirePermission?: (permission: string) => MiddlewareHandler;
+  resolveTeacherId?: (context: Context) => string | null;
 }
+
+const passThroughPermission = (): MiddlewareHandler => {
+  return async (_, next) => {
+    await next();
+  };
+};
+
+const defaultResolveTeacherId = (c: Context): string | null => {
+  const auth = c.get("auth");
+  if (!auth || auth.role !== "teacher" || !auth.teacherId) {
+    return null;
+  }
+  return auth.teacherId;
+};
 
 const parsePositiveInteger = (raw: string | undefined): number | undefined => {
   if (raw === undefined) {
@@ -55,14 +71,16 @@ export const createTeacherRoutes = ({
     async executeActivity() {
       throw new Error("teacherActivityExecutionService is not configured");
     }
-  }
+  },
+  requirePermission = passThroughPermission,
+  resolveTeacherId = defaultResolveTeacherId
 }: TeacherRouteDependencies) => {
   const teacher = new Hono();
 
-  teacher.get("/my-students", async (c) => {
-    const teacherId = c.req.header("x-teacher-id")?.trim();
+  teacher.get("/my-students", requirePermission("teacher.students.read"), async (c) => {
+    const teacherId = resolveTeacherId(c);
     if (!teacherId) {
-      return c.json({ message: "teacher id required" }, 401);
+      return c.json({ message: "unauthorized" }, 401);
     }
 
     const page = parsePositiveInteger(c.req.query("page")) ?? 1;
@@ -84,10 +102,10 @@ export const createTeacherRoutes = ({
     return c.json(result, 200);
   });
 
-  teacher.get("/students/:id/detail", async (c) => {
-    const teacherId = c.req.header("x-teacher-id")?.trim();
+  teacher.get("/students/:id/detail", requirePermission("teacher.student.detail.read"), async (c) => {
+    const teacherId = resolveTeacherId(c);
     if (!teacherId) {
-      return c.json({ message: "teacher id required" }, 401);
+      return c.json({ message: "unauthorized" }, 401);
     }
 
     const studentId = Number.parseInt(c.req.param("id"), 10);
@@ -112,10 +130,10 @@ export const createTeacherRoutes = ({
     }
   });
 
-  teacher.post("/activities/:id/execute", async (c) => {
-    const teacherId = c.req.header("x-teacher-id")?.trim();
+  teacher.post("/activities/:id/execute", requirePermission("teacher.activity.execute"), async (c) => {
+    const teacherId = resolveTeacherId(c);
     if (!teacherId) {
-      return c.json({ message: "teacher id required" }, 401);
+      return c.json({ message: "unauthorized" }, 401);
     }
 
     const activityId = Number.parseInt(c.req.param("id"), 10);

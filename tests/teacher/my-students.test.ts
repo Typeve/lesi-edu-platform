@@ -5,6 +5,13 @@ import { createTeacherMyStudentsService, type TeacherMyStudentsRepository } from
 import { createAuthorizationGrantService } from "../../src/modules/authorization/grant-service.ts";
 import { createTeacherRoutes } from "../../src/routes/teacher.ts";
 
+const resolveTeacherIdFromLegacyHeader = (request: {
+  req: { header(name: string): string | undefined };
+}): string | null => {
+  const teacherId = request.req.header("x-teacher-id")?.trim();
+  return teacherId?.length ? teacherId : null;
+};
+
 test("teacher my students service should keep stable pagination order by studentId", async () => {
   const repo: TeacherMyStudentsRepository = {
     async listAuthorizedStudents() {
@@ -76,7 +83,8 @@ test("GET /teacher/my-students should require teacher id", async () => {
         async getMyStudents() {
           return { page: 1, pageSize: 20, total: 0, items: [] };
         }
-      }
+      },
+      resolveTeacherId: resolveTeacherIdFromLegacyHeader
     })
   );
 
@@ -120,7 +128,8 @@ test("GET /teacher/my-students should support filters and pagination", async () 
             ]
           };
         }
-      }
+      },
+      resolveTeacherId: resolveTeacherIdFromLegacyHeader
     })
   );
 

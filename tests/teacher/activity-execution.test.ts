@@ -8,6 +8,13 @@ import {
 } from "../../src/modules/teacher/activity-execution.ts";
 import { createTeacherRoutes } from "../../src/routes/teacher.ts";
 
+const resolveTeacherIdFromLegacyHeader = (request: {
+  req: { header(name: string): string | undefined };
+}): string | null => {
+  const teacherId = request.req.header("x-teacher-id")?.trim();
+  return teacherId?.length ? teacherId : null;
+};
+
 test("teacher activity execution service should upsert execution payload", async () => {
   let saved = 0;
   const repo: TeacherActivityExecutionRepository = {
@@ -71,7 +78,8 @@ test("POST /teacher/activities/:id/execute should return 403 when teacher not as
         async executeActivity() {
           throw new TeacherActivityForbiddenError();
         }
-      }
+      },
+      resolveTeacherId: resolveTeacherIdFromLegacyHeader
     })
   );
 
@@ -95,7 +103,8 @@ test("POST /teacher/activities/:id/execute should return submitted record id", a
         async executeActivity() {
           return { recordId: 9, status: "submitted" as const };
         }
-      }
+      },
+      resolveTeacherId: resolveTeacherIdFromLegacyHeader
     })
   );
 

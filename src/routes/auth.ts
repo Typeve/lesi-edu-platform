@@ -1,5 +1,5 @@
-import { Hono, type MiddlewareHandler } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
+import { Hono, type MiddlewareHandler } from "hono";
 import {
   InvalidNewPasswordError,
   StudentChangePasswordUnauthorizedError,
@@ -7,15 +7,20 @@ import {
   type StudentAuthService
 } from "../modules/auth/service.js";
 import {
-  SessionAuthUnauthorizedError,
-  type SessionAuthService
-} from "../modules/auth/session.js";
-import {
   StudentFirstLoginVerificationMismatchError,
   StudentFirstLoginVerificationNotFoundError,
   type StudentFirstLoginVerificationService
 } from "../modules/auth/first-login-verification.js";
+import type { SessionAuthService } from "../modules/auth/session-service.js";
+import { SessionUnauthorizedError } from "../modules/auth/session-service.js";
 import type { EnrollmentProfileService } from "../modules/enrollment/profile.js";
+import {
+  UnifiedAuthFrozenError,
+  UnifiedAuthInvalidNewPasswordError,
+  UnifiedAuthUnauthorizedError,
+  UnifiedAuthUnsupportedError,
+  type UnifiedAuthService
+} from "../modules/auth/unified-service.js";
 
 interface StudentLoginRequestBody {
   studentNo: string;
@@ -27,11 +32,6 @@ interface StudentChangePasswordRequestBody {
   newPassword: string;
 }
 
-interface SessionLoginRequestBody {
-  account: string;
-  password: string;
-}
-
 interface StudentFirstLoginVerificationRequestBody {
   name: string;
   credentialNo: string;
@@ -39,24 +39,34 @@ interface StudentFirstLoginVerificationRequestBody {
   majorName: string;
 }
 
+interface UnifiedLoginRequestBody {
+  account: string;
+  password: string;
+}
+
+interface UnifiedChangePasswordRequestBody {
+  oldPassword: string;
+  newPassword: string;
+}
+
 export interface AuthRouteDependencies {
   studentAuthService: StudentAuthService;
-  sessionAuthService?: SessionAuthService;
   studentFirstLoginVerificationService?: Pick<
     StudentFirstLoginVerificationService,
     "verifyStudentFirstLogin"
   >;
   enrollmentProfileService?: Pick<EnrollmentProfileService, "getEnrollmentProfile">;
+  unifiedAuthService?: Pick<UnifiedAuthService, "changePassword">;
+  sessionAuthService?: SessionAuthService;
   requireStudentAuth?: MiddlewareHandler;
+  requireAuth?: MiddlewareHandler;
 }
+
+const REFRESH_COOKIE_NAME = "refresh_token";
 
 const passThroughAuthMiddleware: MiddlewareHandler = async (_, next) => {
   await next();
 };
-
-const REFRESH_TOKEN_COOKIE_KEY = "refresh_token";
-const REFRESH_TOKEN_COOKIE_PATH = "/";
-const REFRESH_TOKEN_COOKIE_SAME_SITE = "Lax";
 
 const isValidLoginBody = (body: unknown): body is StudentLoginRequestBody => {
   if (!body || typeof body !== "object") {
@@ -90,7 +100,7 @@ const isValidChangePasswordBody = (body: unknown): body is StudentChangePassword
   );
 };
 
-const isValidSessionLoginBody = (body: unknown): body is SessionLoginRequestBody => {
+const isValidUnifiedLoginBody = (body: unknown): body is UnifiedLoginRequestBody => {
   if (!body || typeof body !== "object") {
     return false;
   }
@@ -103,6 +113,24 @@ const isValidSessionLoginBody = (body: unknown): body is SessionLoginRequestBody
     account.trim().length > 0 &&
     typeof password === "string" &&
     password.length > 0
+  );
+};
+
+const isValidUnifiedChangePasswordBody = (
+  body: unknown
+): body is UnifiedChangePasswordRequestBody => {
+  if (!body || typeof body !== "object") {
+    return false;
+  }
+
+  const oldPassword = (body as { oldPassword?: unknown }).oldPassword;
+  const newPassword = (body as { newPassword?: unknown }).newPassword;
+
+  return (
+    typeof oldPassword === "string" &&
+    oldPassword.length > 0 &&
+    typeof newPassword === "string" &&
+    newPassword.length > 0
   );
 };
 
@@ -145,6 +173,12 @@ const defaultEnrollmentProfileService: Pick<EnrollmentProfileService, "getEnroll
   }
 };
 
+const defaultUnifiedAuthService: Pick<UnifiedAuthService, "changePassword"> = {
+  async changePassword() {
+    throw new Error("unifiedAuthService is not configured");
+  }
+};
+
 const defaultSessionAuthService: SessionAuthService = {
   async login() {
     throw new Error("sessionAuthService is not configured");
@@ -155,77 +189,26 @@ const defaultSessionAuthService: SessionAuthService = {
   async logout() {
     throw new Error("sessionAuthService is not configured");
   },
-  async getSessionUser() {
+  async me() {
     throw new Error("sessionAuthService is not configured");
   }
 };
 
-const getRefreshCookieValue = (c: Parameters<MiddlewareHandler>[0]): string | null => {
-  const refreshToken = getCookie(c, REFRESH_TOKEN_COOKIE_KEY);
-  if (!refreshToken || refreshToken.trim().length === 0) {
-    return null;
-  }
-
-  return refreshToken;
-};
-
-const setRefreshCookie = ({
-  c,
-  refreshToken,
-  maxAge
-}: {
-  c: Parameters<MiddlewareHandler>[0];
-  refreshToken: string;
-  maxAge: number;
-}): void => {
-  setCookie(c, REFRESH_TOKEN_COOKIE_KEY, refreshToken, {
-    httpOnly: true,
-    sameSite: REFRESH_TOKEN_COOKIE_SAME_SITE,
-    path: REFRESH_TOKEN_COOKIE_PATH,
-    secure: process.env.NODE_ENV === "production",
-    maxAge
-  });
-};
-
-const clearRefreshCookie = (c: Parameters<MiddlewareHandler>[0]): void => {
-  deleteCookie(c, REFRESH_TOKEN_COOKIE_KEY, {
-    path: REFRESH_TOKEN_COOKIE_PATH
-  });
-};
-
-const getBearerToken = (authorizationHeader: string | undefined): string | null => {
-  if (!authorizationHeader) {
-    return null;
-  }
-
-  const matched = authorizationHeader.match(/^Bearer\s+(.+)$/i);
-  if (!matched || !matched[1]) {
-    return null;
-  }
-
-  return matched[1].trim();
-};
-
 export const createAuthRoutes = ({
   studentAuthService,
-  sessionAuthService = defaultSessionAuthService,
   studentFirstLoginVerificationService = defaultStudentFirstLoginVerificationService,
   enrollmentProfileService = defaultEnrollmentProfileService,
-  requireStudentAuth = passThroughAuthMiddleware
+  unifiedAuthService = defaultUnifiedAuthService,
+  sessionAuthService = defaultSessionAuthService,
+  requireStudentAuth = passThroughAuthMiddleware,
+  requireAuth = passThroughAuthMiddleware
 }: AuthRouteDependencies) => {
   const auth = new Hono();
 
   auth.post("/login", async (c) => {
-    let body: unknown;
-
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ message: "invalid request body" }, 400);
-    }
-
-    if (!isValidSessionLoginBody(body)) {
-      return c.json({ message: "account and password are required" }, 400);
+    const body = (await c.req.json().catch(() => null)) as unknown;
+    if (!isValidUnifiedLoginBody(body)) {
+      return c.json({ message: "account/password is required" }, 400);
     }
 
     try {
@@ -233,9 +216,12 @@ export const createAuthRoutes = ({
         account: body.account.trim(),
         password: body.password
       });
-      setRefreshCookie({
-        c,
-        refreshToken: result.refreshToken,
+
+      setCookie(c, REFRESH_COOKIE_NAME, result.refreshToken, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "Strict",
+        path: "/",
         maxAge: result.refreshExpiresIn
       });
 
@@ -243,33 +229,38 @@ export const createAuthRoutes = ({
         {
           accessToken: result.accessToken,
           expiresIn: result.expiresIn,
-          user: result.user
+          user: {
+            userId: result.user.userId,
+            role: result.user.role,
+            displayName: result.user.displayName
+          }
         },
         200
       );
     } catch (error) {
-      if (error instanceof SessionAuthUnauthorizedError) {
+      if (error instanceof SessionUnauthorizedError || error instanceof UnifiedAuthUnauthorizedError) {
         return c.json({ message: "unauthorized" }, 401);
       }
-
+      if (error instanceof UnifiedAuthFrozenError) {
+        return c.json({ message: error.message }, 403);
+      }
       throw error;
     }
   });
 
   auth.post("/refresh", async (c) => {
-    const refreshToken = getRefreshCookieValue(c);
-
+    const refreshToken = getCookie(c, REFRESH_COOKIE_NAME);
     if (!refreshToken) {
       return c.json({ message: "unauthorized" }, 401);
     }
 
     try {
-      const result = await sessionAuthService.refresh({
-        refreshToken
-      });
-      setRefreshCookie({
-        c,
-        refreshToken: result.refreshToken,
+      const result = await sessionAuthService.refresh(refreshToken);
+      setCookie(c, REFRESH_COOKIE_NAME, result.refreshToken, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "Strict",
+        path: "/",
         maxAge: result.refreshExpiresIn
       });
 
@@ -277,55 +268,97 @@ export const createAuthRoutes = ({
         {
           accessToken: result.accessToken,
           expiresIn: result.expiresIn,
-          user: result.user
+          user: {
+            userId: result.user.userId,
+            role: result.user.role,
+            displayName: result.user.displayName
+          }
         },
         200
       );
     } catch (error) {
-      if (error instanceof SessionAuthUnauthorizedError) {
+      if (error instanceof SessionUnauthorizedError) {
         return c.json({ message: "unauthorized" }, 401);
       }
-
       throw error;
     }
   });
 
   auth.post("/logout", async (c) => {
-    const refreshToken = getRefreshCookieValue(c);
-
+    const refreshToken = getCookie(c, REFRESH_COOKIE_NAME);
     if (refreshToken) {
-      try {
-        await sessionAuthService.logout({ refreshToken });
-      } catch (error) {
-        if (!(error instanceof SessionAuthUnauthorizedError)) {
-          throw error;
-        }
-      }
+      await sessionAuthService.logout(refreshToken).catch(() => undefined);
     }
 
-    clearRefreshCookie(c);
-    return c.json({ message: "logged out" }, 200);
+    deleteCookie(c, REFRESH_COOKIE_NAME, {
+      path: "/"
+    });
+
+    return c.json({ message: "logout success" }, 200);
   });
 
-  auth.get("/me", async (c) => {
-    const authorization = c.req.header("authorization");
-    const accessToken = getBearerToken(authorization);
-    if (!accessToken) {
+  auth.get("/me", requireAuth, async (c) => {
+    const authInfo = c.get("auth");
+    if (!authInfo) {
       return c.json({ message: "unauthorized" }, 401);
     }
 
-    try {
-      const user = await sessionAuthService.getSessionUser({ accessToken });
-      return c.json(user, 200);
-    } catch (error) {
-      if (error instanceof SessionAuthUnauthorizedError) {
-        return c.json({ message: "unauthorized" }, 401);
-      }
+    return c.json(
+      {
+        userId: authInfo.sub,
+        role: authInfo.role,
+        account: authInfo.account,
+        displayName: authInfo.displayName ?? authInfo.account,
+        studentId: authInfo.studentId,
+        studentNo: authInfo.studentNo,
+        teacherId: authInfo.teacherId,
+        mustChangePassword: authInfo.mustChangePassword ?? false,
+        scope: {
+          schoolId: authInfo.schoolId,
+          collegeId: authInfo.collegeId,
+          majorId: authInfo.majorId,
+          classId: authInfo.classId
+        }
+      },
+      200
+    );
+  });
 
+  auth.post("/change-password", requireAuth, async (c) => {
+    const authInfo = c.get("auth");
+    if (!authInfo) {
+      return c.json({ message: "unauthorized" }, 401);
+    }
+
+    const body = (await c.req.json().catch(() => null)) as unknown;
+    if (!isValidUnifiedChangePasswordBody(body)) {
+      return c.json({ message: "oldPassword and newPassword are required" }, 400);
+    }
+
+    try {
+      await unifiedAuthService.changePassword({
+        role: authInfo.role,
+        subjectId: authInfo.sub,
+        oldPassword: body.oldPassword,
+        newPassword: body.newPassword
+      });
+
+      return c.json({ message: "password changed" }, 200);
+    } catch (error) {
+      if (error instanceof UnifiedAuthUnauthorizedError) {
+        return c.json({ message: error.message }, 401);
+      }
+      if (error instanceof UnifiedAuthFrozenError) {
+        return c.json({ message: error.message }, 403);
+      }
+      if (error instanceof UnifiedAuthInvalidNewPasswordError || error instanceof UnifiedAuthUnsupportedError) {
+        return c.json({ message: error.message }, 400);
+      }
       throw error;
     }
   });
 
+  // 兼容已存在 student 流程（首登校验/画像等），逐步迁移中。
   auth.post("/student/login", async (c) => {
     let body: unknown;
 

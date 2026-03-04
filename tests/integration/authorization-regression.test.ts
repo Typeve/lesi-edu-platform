@@ -21,6 +21,22 @@ const requireStudentAuth: MiddlewareHandler = async (c, next) => {
   await next();
 };
 
+const requireAdminPermission = () => {
+  return async (c: { req: { header(name: string): string | undefined }; json: Function }, next: () => Promise<void>) => {
+    if (c.req.header("x-admin-key") !== adminApiKey) {
+      return c.json({ message: "forbidden" }, 403);
+    }
+    await next();
+  };
+};
+
+const resolveTeacherIdFromLegacyHeader = (request: {
+  req: { header(name: string): string | undefined };
+}): string | null => {
+  const teacherId = request.req.header("x-teacher-id")?.trim();
+  return teacherId?.length ? teacherId : null;
+};
+
 const createApp = () => {
   const app = new Hono();
 
@@ -62,7 +78,7 @@ const createApp = () => {
           return;
         }
       },
-      adminApiKey
+      requirePermission: requireAdminPermission
     })
   );
 
@@ -121,7 +137,8 @@ const createApp = () => {
         async executeActivity() {
           return { recordId: 1, status: "submitted" as const };
         }
-      }
+      },
+      resolveTeacherId: resolveTeacherIdFromLegacyHeader
     })
   );
 

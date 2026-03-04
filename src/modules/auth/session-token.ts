@@ -1,12 +1,4 @@
-import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
-import type {
-  SessionRole,
-  SessionTokenManager,
-  SessionTokenPair,
-  SessionUserView,
-  VerifiedRefreshToken
-} from "./session.js";
 
 const require = createRequire(import.meta.url);
 const jwt = require("jsonwebtoken") as {
@@ -14,48 +6,52 @@ const jwt = require("jsonwebtoken") as {
   verify(token: string, secret: string): string | Record<string, unknown>;
 };
 
-const DEFAULT_ACCESS_EXPIRES_IN_SECONDS = 15 * 60;
-const DEFAULT_REFRESH_EXPIRES_IN_SECONDS = 30 * 24 * 60 * 60;
-const ACCESS_TOKEN_TYPE = "access";
-const REFRESH_TOKEN_TYPE = "refresh";
+const SECONDS_PER_DAY = 24 * 60 * 60;
 
-interface CreateJwtSessionTokenManagerInput {
-  secret: string;
-  accessExpiresInSeconds?: number;
-  refreshExpiresInSeconds?: number;
-}
+export type AuthRole = "student" | "teacher" | "admin";
 
-interface SessionJwtPayloadShape {
+export interface AuthTokenPayload {
   sub: string;
-  role: SessionRole;
+  role: AuthRole;
   account: string;
-  name: string;
-  tokenType: "access" | "refresh";
+  displayName?: string;
   studentId?: number;
   studentNo?: string;
   teacherId?: string;
-  exp?: number;
+  schoolId?: number;
+  collegeId?: number;
+  majorId?: number;
+  classId?: number;
+  mustChangePassword?: boolean;
 }
 
-const isSessionRole = (value: unknown): value is SessionRole => {
-  return value === "admin" || value === "teacher" || value === "student";
+export interface AuthTokenSigner {
+  expiresIn: number;
+  signAuthToken(payload: AuthTokenPayload): string;
+}
+
+export interface CreateAuthTokenSignerInput {
+  secret: string;
+  expiresInDays: number;
+}
+
+export interface AuthTokenVerifier {
+  verifyAuthToken(token: string): AuthTokenPayload | null;
+}
+
+export interface CreateAuthTokenVerifierInput {
+  secret: string;
+}
+
+const isPositiveInteger = (value: unknown): value is number => {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
 };
 
-const isValidSessionUser = (value: SessionUserView): boolean => {
-  if (!value.userId || !value.account || !value.name) {
-    return false;
-  }
-
-  if (!isSessionRole(value.role)) {
-    return false;
-  }
-
-  return true;
+const normalizeOptionalInteger = (value: unknown): number | undefined => {
+  return isPositiveInteger(value) ? value : undefined;
 };
 
-const toSessionPayload = (
-  payload: string | Record<string, unknown>
-): SessionJwtPayloadShape | null => {
+const toVerifiedPayload = (payload: string | Record<string, unknown>): AuthTokenPayload | null => {
   if (!payload || typeof payload !== "object") {
     return null;
   }
@@ -63,195 +59,62 @@ const toSessionPayload = (
   const sub = payload.sub;
   const role = payload.role;
   const account = payload.account;
-  const name = payload.name;
-  const tokenType = payload.tokenType;
-  const exp = payload.exp;
 
-  if (
-    typeof sub !== "string" ||
-    !isSessionRole(role) ||
-    typeof account !== "string" ||
-    typeof name !== "string" ||
-    (tokenType !== ACCESS_TOKEN_TYPE && tokenType !== REFRESH_TOKEN_TYPE)
-  ) {
+  if (typeof sub !== "string" || (role !== "student" && role !== "teacher" && role !== "admin") || typeof account !== "string") {
     return null;
   }
 
-  const basePayload: SessionJwtPayloadShape = {
+  const studentId = normalizeOptionalInteger(payload.studentId);
+  const displayName = typeof payload.displayName === "string" ? payload.displayName : undefined;
+  const schoolId = normalizeOptionalInteger(payload.schoolId);
+  const collegeId = normalizeOptionalInteger(payload.collegeId);
+  const majorId = normalizeOptionalInteger(payload.majorId);
+  const classId = normalizeOptionalInteger(payload.classId);
+  const studentNo = typeof payload.studentNo === "string" ? payload.studentNo : undefined;
+  const teacherId = typeof payload.teacherId === "string" ? payload.teacherId : undefined;
+  const mustChangePassword = typeof payload.mustChangePassword === "boolean" ? payload.mustChangePassword : undefined;
+
+  return {
     sub,
     role,
     account,
-    name,
-    tokenType
-  };
-
-  if (typeof payload.studentNo === "string") {
-    basePayload.studentNo = payload.studentNo;
-  }
-  if (typeof payload.teacherId === "string") {
-    basePayload.teacherId = payload.teacherId;
-  }
-  if (typeof payload.studentId === "number" && Number.isInteger(payload.studentId)) {
-    basePayload.studentId = payload.studentId;
-  }
-  if (typeof exp === "number" && Number.isInteger(exp)) {
-    basePayload.exp = exp;
-  }
-
-  return basePayload;
-};
-
-const toUserView = (payload: SessionJwtPayloadShape): SessionUserView => {
-  return {
-    userId: payload.sub,
-    role: payload.role,
-    account: payload.account,
-    name: payload.name,
-    studentNo: payload.studentNo,
-    teacherId: payload.teacherId,
-    studentId: payload.studentId
+    displayName,
+    studentId,
+    studentNo,
+    teacherId,
+    schoolId,
+    collegeId,
+    majorId,
+    classId,
+    mustChangePassword
   };
 };
 
-const toRefreshExpiresAt = (payload: SessionJwtPayloadShape): Date | null => {
-  if (!payload.exp) {
-    return null;
-  }
-
-  return new Date(payload.exp * 1000);
-};
-
-const signToken = ({
+export const createJwtAuthTokenSigner = ({
   secret,
-  expiresInSeconds,
-  tokenType,
-  user
-}: {
-  secret: string;
-  expiresInSeconds: number;
-  tokenType: "access" | "refresh";
-  user: SessionUserView;
-}): string => {
-  const payload: Record<string, unknown> = {
-    sub: user.userId,
-    role: user.role,
-    account: user.account,
-    name: user.name,
-    tokenType
-  };
+  expiresInDays
+}: CreateAuthTokenSignerInput): AuthTokenSigner => {
+  const expiresIn = expiresInDays * SECONDS_PER_DAY;
 
-  if (user.studentId) {
-    payload.studentId = user.studentId;
-  }
-  if (user.studentNo) {
-    payload.studentNo = user.studentNo;
-  }
-  if (user.teacherId) {
-    payload.teacherId = user.teacherId;
-  }
-  if (tokenType === REFRESH_TOKEN_TYPE) {
-    payload.jti = randomUUID();
-  }
-
-  return jwt.sign(payload, secret, { expiresIn: expiresInSeconds });
-};
-
-const verifyTokenPayload = (
-  secret: string,
-  token: string,
-  expectedTokenType: "access" | "refresh"
-): SessionJwtPayloadShape | null => {
-  try {
-    const payload = jwt.verify(token, secret);
-    const decoded = toSessionPayload(payload);
-    if (!decoded || decoded.tokenType !== expectedTokenType) {
-      return null;
+  return {
+    expiresIn,
+    signAuthToken(payload) {
+      return jwt.sign(payload as unknown as Record<string, unknown>, secret, { expiresIn });
     }
-
-    return decoded;
-  } catch {
-    return null;
-  }
-};
-
-const toTokenPair = ({
-  user,
-  secret,
-  accessExpiresIn,
-  refreshExpiresIn
-}: {
-  user: SessionUserView;
-  secret: string;
-  accessExpiresIn: number;
-  refreshExpiresIn: number;
-}): SessionTokenPair => {
-  const accessToken = signToken({
-    secret,
-    expiresInSeconds: accessExpiresIn,
-    tokenType: ACCESS_TOKEN_TYPE,
-    user
-  });
-  const refreshToken = signToken({
-    secret,
-    expiresInSeconds: refreshExpiresIn,
-    tokenType: REFRESH_TOKEN_TYPE,
-    user
-  });
-
-  return {
-    accessToken,
-    refreshToken,
-    accessExpiresIn,
-    refreshExpiresIn,
-    refreshExpiresAt: new Date(Date.now() + refreshExpiresIn * 1000)
   };
 };
 
-const toVerifiedRefreshToken = (payload: SessionJwtPayloadShape): VerifiedRefreshToken | null => {
-  const expiresAt = toRefreshExpiresAt(payload);
-  if (!expiresAt) {
-    return null;
-  }
-
+export const createJwtAuthTokenVerifier = ({
+  secret
+}: CreateAuthTokenVerifierInput): AuthTokenVerifier => {
   return {
-    user: toUserView(payload),
-    expiresAt
-  };
-};
-
-export const createJwtSessionTokenManager = ({
-  secret,
-  accessExpiresInSeconds = DEFAULT_ACCESS_EXPIRES_IN_SECONDS,
-  refreshExpiresInSeconds = DEFAULT_REFRESH_EXPIRES_IN_SECONDS
-}: CreateJwtSessionTokenManagerInput): SessionTokenManager => {
-  return {
-    createTokenPair(user) {
-      if (!isValidSessionUser(user)) {
-        throw new Error("invalid session user");
-      }
-
-      return toTokenPair({
-        user,
-        secret,
-        accessExpiresIn: accessExpiresInSeconds,
-        refreshExpiresIn: refreshExpiresInSeconds
-      });
-    },
-    verifyAccessToken(token) {
-      const payload = verifyTokenPayload(secret, token, ACCESS_TOKEN_TYPE);
-      if (!payload) {
+    verifyAuthToken(token) {
+      try {
+        const decoded = jwt.verify(token, secret);
+        return toVerifiedPayload(decoded);
+      } catch {
         return null;
       }
-
-      return toUserView(payload);
-    },
-    verifyRefreshToken(token) {
-      const payload = verifyTokenPayload(secret, token, REFRESH_TOKEN_TYPE);
-      if (!payload) {
-        return null;
-      }
-
-      return toVerifiedRefreshToken(payload);
     }
   };
 };

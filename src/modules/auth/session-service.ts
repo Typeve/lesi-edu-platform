@@ -1,183 +1,194 @@
-import { createHash } from "node:crypto";
+import type { AuthTokenPayload, AuthTokenSigner, AuthTokenVerifier } from "./session-token.js";
 import type {
-  CreateSessionAuthServiceInput,
-  SessionAuthResult,
-  SessionRefreshTokenRecord,
-  SessionUserView
-} from "./session.js";
-import { SessionAuthUnauthorizedError } from "./session.js";
+  RefreshTokenSigner,
+  RefreshTokenVerifier,
+  VerifiedRefreshTokenPayload
+} from "./refresh-token.js";
+import { hashRefreshToken } from "./refresh-token.js";
 
-const DUMMY_PASSWORD_HASH = "$2b$10$ykqJ8CfeprKl2UpQm9a7ZOv9wZWyG2J.AoPTB5oTvbGdZyc/Ljcsm";
-
-const hasUsablePasswordHash = (passwordHash: string | null): passwordHash is string => {
-  return typeof passwordHash === "string" && passwordHash.trim().length > 0;
-};
-
-const hashRefreshToken = (token: string): string => {
-  return createHash("sha256").update(token).digest("hex");
-};
-
-const toSessionUserView = (account: {
-  userId: string;
-  role: "admin" | "teacher" | "student";
-  account: string;
-  name: string;
-  teacherId?: string;
-  studentId?: number;
-  studentNo?: string;
-}): SessionUserView => {
-  return {
-    userId: account.userId,
-    role: account.role,
-    account: account.account,
-    name: account.name,
-    teacherId: account.teacherId,
-    studentId: account.studentId,
-    studentNo: account.studentNo
+export interface SessionLoginResult {
+  accessToken: string;
+  expiresIn: number;
+  refreshToken: string;
+  refreshExpiresIn: number;
+  user: {
+    userId: string;
+    role: AuthTokenPayload["role"];
+    displayName: string;
+    account: string;
   };
-};
+}
 
-const toSessionAuthResult = ({
-  user,
-  pair
-}: {
-  user: SessionUserView;
-  pair: {
-    accessToken: string;
-    refreshToken: string;
-    accessExpiresIn: number;
-    refreshExpiresIn: number;
-  };
-}): SessionAuthResult => {
-  return {
-    accessToken: pair.accessToken,
-    refreshToken: pair.refreshToken,
-    expiresIn: pair.accessExpiresIn,
-    refreshExpiresIn: pair.refreshExpiresIn,
-    user
-  };
-};
+export interface SessionAuthService {
+  login(input: { account: string; password: string }): Promise<SessionLoginResult>;
+  refresh(refreshToken: string): Promise<SessionLoginResult>;
+  logout(refreshToken: string): Promise<void>;
+  me(accessToken: string): Promise<AuthTokenPayload>;
+}
 
-const isSessionUserSame = (left: SessionUserView, right: SessionUserView): boolean => {
-  return left.userId === right.userId && left.role === right.role && left.account === right.account;
-};
+export interface SessionAuthenticator {
+  loginByAccount(account: string, password: string): Promise<AuthTokenPayload>;
+}
 
-const isRefreshRecordActive = (record: SessionRefreshTokenRecord, now: Date): boolean => {
+export interface RefreshTokenRecord {
+  tokenHash: string;
+  auth: AuthTokenPayload;
+  expiresAt: Date;
+  revokedAt: Date | null;
+  createdAt: Date;
+}
+
+export interface RefreshTokenRepository {
+  save(record: RefreshTokenRecord): Promise<void>;
+  findByTokenHash(tokenHash: string): Promise<RefreshTokenRecord | null>;
+  revokeByTokenHash(tokenHash: string, revokedAt: Date): Promise<void>;
+}
+
+export class SessionUnauthorizedError extends Error {
+  constructor() {
+    super("unauthorized");
+    this.name = "SessionUnauthorizedError";
+  }
+}
+
+const toPublicUser = (auth: AuthTokenPayload) => ({
+  userId: auth.sub,
+  role: auth.role,
+  displayName: auth.displayName ?? auth.account,
+  account: auth.account
+});
+
+const isRefreshTokenRecordActive = (record: RefreshTokenRecord, now: Date): boolean => {
   if (record.revokedAt) {
     return false;
   }
-
   return record.expiresAt.getTime() > now.getTime();
 };
 
+const isAuthSubjectSame = (left: AuthTokenPayload, right: AuthTokenPayload): boolean => {
+  return left.sub === right.sub && left.role === right.role && left.account === right.account;
+};
+
 const buildRefreshRecord = ({
-  tokenHash,
-  user,
-  refreshExpiresAt,
+  refreshToken,
+  verifiedRefreshToken,
   now
 }: {
-  tokenHash: string;
-  user: SessionUserView;
-  refreshExpiresAt: Date;
+  refreshToken: string;
+  verifiedRefreshToken: VerifiedRefreshTokenPayload;
   now: Date;
-}): SessionRefreshTokenRecord => {
+}): RefreshTokenRecord => {
   return {
-    tokenHash,
-    user,
-    createdAt: now,
-    expiresAt: refreshExpiresAt,
-    revokedAt: null
+    tokenHash: hashRefreshToken(refreshToken),
+    auth: verifiedRefreshToken.auth,
+    expiresAt: verifiedRefreshToken.expiresAt,
+    revokedAt: null,
+    createdAt: now
   };
 };
 
 export const createSessionAuthService = ({
-  accountRepo,
-  refreshTokenRepo,
-  passwordVerifier,
-  tokenManager
-}: CreateSessionAuthServiceInput) => {
+  authenticator,
+  authTokenSigner,
+  authTokenVerifier,
+  refreshTokenSigner,
+  refreshTokenVerifier,
+  refreshTokenRepo
+}: {
+  authenticator: SessionAuthenticator;
+  authTokenSigner: AuthTokenSigner;
+  authTokenVerifier: AuthTokenVerifier;
+  refreshTokenSigner: RefreshTokenSigner;
+  refreshTokenVerifier: RefreshTokenVerifier;
+  refreshTokenRepo: RefreshTokenRepository;
+}): SessionAuthService => {
   return {
-    async login({ account, password }) {
-      const normalizedAccount = account.trim();
-      const accountRecord = await accountRepo.findByAccount(normalizedAccount);
-      const passwordHashForCompare = hasUsablePasswordHash(accountRecord?.passwordHash ?? null)
-        ? accountRecord!.passwordHash
-        : DUMMY_PASSWORD_HASH;
-      const passwordMatched = await passwordVerifier.compare(password, passwordHashForCompare);
-      const isFrozen = accountRecord?.status === "frozen";
+    async login({
+      account,
+      password
+    }: {
+      account: string;
+      password: string;
+    }): Promise<SessionLoginResult> {
+      const auth = await authenticator.loginByAccount(account, password);
+      const accessToken = authTokenSigner.signAuthToken(auth);
+      const refreshToken = refreshTokenSigner.signRefreshToken(auth);
+      const verifiedRefreshToken = refreshTokenVerifier.verifyRefreshToken(refreshToken);
 
-      if (!accountRecord || !hasUsablePasswordHash(accountRecord.passwordHash) || !passwordMatched || isFrozen) {
-        throw new SessionAuthUnauthorizedError();
+      if (!verifiedRefreshToken) {
+        throw new SessionUnauthorizedError();
       }
-
-      const user = toSessionUserView(accountRecord);
-      const tokenPair = tokenManager.createTokenPair(user);
-      const tokenHash = hashRefreshToken(tokenPair.refreshToken);
-      const now = new Date();
 
       await refreshTokenRepo.save(
         buildRefreshRecord({
-          tokenHash,
-          user,
-          refreshExpiresAt: tokenPair.refreshExpiresAt,
+          refreshToken,
+          verifiedRefreshToken,
+          now: new Date()
+        })
+      );
+
+      return {
+        accessToken,
+        expiresIn: authTokenSigner.expiresIn,
+        refreshToken,
+        refreshExpiresIn: refreshTokenSigner.expiresIn,
+        user: toPublicUser(auth)
+      };
+    },
+
+    async refresh(refreshToken: string): Promise<SessionLoginResult> {
+      const verifiedRefreshToken = refreshTokenVerifier.verifyRefreshToken(refreshToken);
+      if (!verifiedRefreshToken) {
+        throw new SessionUnauthorizedError();
+      }
+
+      const now = new Date();
+      const tokenHash = hashRefreshToken(refreshToken);
+      const existing = await refreshTokenRepo.findByTokenHash(tokenHash);
+      if (!existing || !isRefreshTokenRecordActive(existing, now)) {
+        throw new SessionUnauthorizedError();
+      }
+
+      if (!isAuthSubjectSame(existing.auth, verifiedRefreshToken.auth)) {
+        throw new SessionUnauthorizedError();
+      }
+
+      await refreshTokenRepo.revokeByTokenHash(tokenHash, now);
+
+      const nextAccessToken = authTokenSigner.signAuthToken(verifiedRefreshToken.auth);
+      const nextRefreshToken = refreshTokenSigner.signRefreshToken(verifiedRefreshToken.auth);
+      const verifiedNextRefreshToken = refreshTokenVerifier.verifyRefreshToken(nextRefreshToken);
+      if (!verifiedNextRefreshToken) {
+        throw new SessionUnauthorizedError();
+      }
+
+      await refreshTokenRepo.save(
+        buildRefreshRecord({
+          refreshToken: nextRefreshToken,
+          verifiedRefreshToken: verifiedNextRefreshToken,
           now
         })
       );
 
-      return toSessionAuthResult({
-        user,
-        pair: tokenPair
-      });
+      return {
+        accessToken: nextAccessToken,
+        expiresIn: authTokenSigner.expiresIn,
+        refreshToken: nextRefreshToken,
+        refreshExpiresIn: refreshTokenSigner.expiresIn,
+        user: toPublicUser(verifiedRefreshToken.auth)
+      };
     },
-    async refresh({ refreshToken }) {
-      const verifiedToken = tokenManager.verifyRefreshToken(refreshToken);
-      if (!verifiedToken) {
-        throw new SessionAuthUnauthorizedError();
-      }
 
-      const now = new Date();
-      const refreshTokenHash = hashRefreshToken(refreshToken);
-      const existingRecord = await refreshTokenRepo.findByTokenHash(refreshTokenHash);
-
-      if (!existingRecord || !isRefreshRecordActive(existingRecord, now)) {
-        throw new SessionAuthUnauthorizedError();
-      }
-
-      if (!isSessionUserSame(existingRecord.user, verifiedToken.user)) {
-        throw new SessionAuthUnauthorizedError();
-      }
-
-      await refreshTokenRepo.revokeByTokenHash(refreshTokenHash, now);
-
-      const tokenPair = tokenManager.createTokenPair(verifiedToken.user);
-      const nextTokenHash = hashRefreshToken(tokenPair.refreshToken);
-
-      await refreshTokenRepo.save(
-        buildRefreshRecord({
-          tokenHash: nextTokenHash,
-          user: verifiedToken.user,
-          refreshExpiresAt: tokenPair.refreshExpiresAt,
-          now
-        })
-      );
-
-      return toSessionAuthResult({
-        user: verifiedToken.user,
-        pair: tokenPair
-      });
+    async logout(refreshToken: string): Promise<void> {
+      await refreshTokenRepo.revokeByTokenHash(hashRefreshToken(refreshToken), new Date());
     },
-    async logout({ refreshToken }) {
-      const now = new Date();
-      const refreshTokenHash = hashRefreshToken(refreshToken);
-      await refreshTokenRepo.revokeByTokenHash(refreshTokenHash, now);
-    },
-    async getSessionUser({ accessToken }) {
-      const user = tokenManager.verifyAccessToken(accessToken);
-      if (!user) {
-        throw new SessionAuthUnauthorizedError();
-      }
 
-      return user;
+    async me(accessToken: string): Promise<AuthTokenPayload> {
+      const auth = authTokenVerifier.verifyAuthToken(accessToken);
+      if (!auth) {
+        throw new SessionUnauthorizedError();
+      }
+      return auth;
     }
   };
 };

@@ -156,7 +156,8 @@ export const createLikertAssessmentResultService = ({
         { direction: "employment", score: employment },
         { direction: "postgraduate", score: postgraduate },
         { direction: "civil_service", score: civilService }
-      ].sort((left, right) => right.score - left.score);
+      ];
+      scores.sort((left, right) => right.score - left.score);
 
       const recommendationDirection = scores[0]?.direction ?? "employment";
 
