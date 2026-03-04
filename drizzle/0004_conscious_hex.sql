@@ -2,7 +2,7 @@ CREATE TABLE `activities` (
 	`id` int AUTO_INCREMENT NOT NULL,
 	`activity_type` enum('course','competition','project') NOT NULL,
 	`title` varchar(128) NOT NULL,
-	`created_at` timestamp NOT NULL DEFAULT (now()),
+	`created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	CONSTRAINT `activities_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
@@ -12,7 +12,7 @@ CREATE TABLE `audit_logs` (
 	`action` enum('authorization_grant','authorization_revoke','password_reset','activity_publish') NOT NULL,
 	`target` varchar(191) NOT NULL,
 	`detail` varchar(255),
-	`created_at` timestamp NOT NULL DEFAULT (now()),
+	`created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	CONSTRAINT `audit_logs_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint

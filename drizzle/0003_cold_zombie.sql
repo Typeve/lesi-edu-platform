@@ -1,28 +1,28 @@
 CREATE TABLE `certificates` (
 	`id` int AUTO_INCREMENT NOT NULL,
 	`student_id` int NOT NULL,
-	`created_at` timestamp NOT NULL DEFAULT (now()),
+	`created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	CONSTRAINT `certificates_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
 CREATE TABLE `profiles` (
 	`id` int AUTO_INCREMENT NOT NULL,
 	`student_id` int NOT NULL,
-	`created_at` timestamp NOT NULL DEFAULT (now()),
+	`created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	CONSTRAINT `profiles_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
 CREATE TABLE `reports` (
 	`id` int AUTO_INCREMENT NOT NULL,
 	`student_id` int NOT NULL,
-	`created_at` timestamp NOT NULL DEFAULT (now()),
+	`created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	CONSTRAINT `reports_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
 CREATE TABLE `tasks` (
 	`id` int AUTO_INCREMENT NOT NULL,
 	`student_id` int NOT NULL,
-	`created_at` timestamp NOT NULL DEFAULT (now()),
+	`created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	CONSTRAINT `tasks_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
@@ -30,7 +30,7 @@ CREATE TABLE `teacher_class_grants` (
 	`id` int AUTO_INCREMENT NOT NULL,
 	`teacher_id` varchar(64) NOT NULL,
 	`class_id` int NOT NULL,
-	`created_at` timestamp NOT NULL DEFAULT (now()),
+	`created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	CONSTRAINT `teacher_class_grants_id` PRIMARY KEY(`id`),
 	CONSTRAINT `teacher_class_grants_teacher_class_unique` UNIQUE(`teacher_id`,`class_id`)
 );
@@ -39,7 +39,7 @@ CREATE TABLE `teacher_student_grants` (
 	`id` int AUTO_INCREMENT NOT NULL,
 	`teacher_id` varchar(64) NOT NULL,
 	`student_id` int NOT NULL,
-	`created_at` timestamp NOT NULL DEFAULT (now()),
+	`created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	CONSTRAINT `teacher_student_grants_id` PRIMARY KEY(`id`),
 	CONSTRAINT `teacher_student_grants_teacher_student_unique` UNIQUE(`teacher_id`,`student_id`)
 );

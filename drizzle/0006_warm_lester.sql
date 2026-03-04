@@ -2,7 +2,7 @@ CREATE TABLE `majors` (
 	`id` int AUTO_INCREMENT NOT NULL,
 	`college_id` int NOT NULL,
 	`name` varchar(128) NOT NULL,
-	`created_at` timestamp NOT NULL DEFAULT (now()),
+	`created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	CONSTRAINT `majors_id` PRIMARY KEY(`id`),
 	CONSTRAINT `majors_college_id_name_unique` UNIQUE(`college_id`,`name`)
 );
