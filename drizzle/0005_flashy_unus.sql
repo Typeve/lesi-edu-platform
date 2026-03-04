@@ -6,7 +6,7 @@ CREATE TABLE `certificate_files` (
 	`mime_type` varchar(128) NOT NULL,
 	`size_bytes` int NOT NULL,
 	`storage_path` varchar(255) NOT NULL,
-	`created_at` timestamp NOT NULL DEFAULT (now()),
+	`created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	CONSTRAINT `certificate_files_id` PRIMARY KEY(`id`),
 	CONSTRAINT `certificate_files_file_id_unique` UNIQUE(`file_id`)
 );

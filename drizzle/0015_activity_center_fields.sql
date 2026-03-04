@@ -6,9 +6,13 @@ ALTER TABLE `activities`
   ADD `end_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   ADD `timeline_json` text,
   ADD `status` enum('draft','published','closed') NOT NULL DEFAULT 'published';
+--> statement-breakpoint
 
 UPDATE `activities` SET `timeline_json` = '[]' WHERE `timeline_json` IS NULL;
+--> statement-breakpoint
 ALTER TABLE `activities` MODIFY `timeline_json` text NOT NULL;
+--> statement-breakpoint
 
 CREATE INDEX `activities_status_idx` ON `activities` (`status`);
+--> statement-breakpoint
 CREATE INDEX `activities_owner_teacher_id_idx` ON `activities` (`owner_teacher_id`);
