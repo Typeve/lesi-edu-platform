@@ -48,6 +48,8 @@ import {
 import { createResourceAuthorizationService, type ResourceType } from "./modules/authorization/service.js";
 import { bcryptPasswordHasher, bcryptPasswordVerifier } from "./modules/auth/password.js";
 import { createStudentAuthService } from "./modules/auth/service.js";
+import { createSessionAuthService } from "./modules/auth/session-service.js";
+import { createJwtSessionTokenManager } from "./modules/auth/session-token.js";
 import { createJwtTokenSigner, createJwtTokenVerifier } from "./modules/auth/token.js";
 import { createStudentFirstLoginVerificationService } from "./modules/auth/first-login-verification.js";
 import { createLikertAssessmentService } from "./modules/assessment/likert.js";
@@ -68,6 +70,7 @@ import healthRoutes from "./routes/health.js";
 import { createResourcesRoutes } from "./routes/resources.js";
 import { createStudentRoutes } from "./routes/student.js";
 import { createTeacherRoutes } from "./routes/teacher.js";
+import type { SessionRefreshTokenRecord } from "./modules/auth/session.js";
 
 const studentRepo = {
   async findStudentByNo(studentNo: string) {
@@ -647,6 +650,112 @@ const teacherActivityExecutionRepo = {
 
 const teacherActivityExecutionService = createTeacherActivityExecutionService({
   teacherActivityExecutionRepo
+});
+
+const SESSION_ADMIN_ACCOUNT = "admin";
+const SESSION_ADMIN_USER_ID = "admin:root";
+const sessionRefreshTokenStore = new Map<string, SessionRefreshTokenRecord>();
+
+const sessionAccountRepo = {
+  async findByAccount(account: string) {
+    const normalizedAccount = account.trim();
+    if (!normalizedAccount) {
+      return null;
+    }
+
+    if (normalizedAccount === SESSION_ADMIN_ACCOUNT) {
+      const passwordHash = await bcryptPasswordHasher.hash(env.ADMIN_API_KEY);
+      return {
+        userId: SESSION_ADMIN_USER_ID,
+        role: "admin" as const,
+        account: SESSION_ADMIN_ACCOUNT,
+        name: "系统管理员",
+        passwordHash,
+        status: "active" as const
+      };
+    }
+
+    const teacherRows = await db
+      .select({
+        teacherId: teachers.teacherId,
+        account: teachers.account,
+        name: teachers.name,
+        passwordHash: teachers.passwordHash,
+        status: teachers.status
+      })
+      .from(teachers)
+      .where(eq(teachers.account, normalizedAccount))
+      .limit(1);
+    const teacher = teacherRows[0];
+
+    if (teacher) {
+      return {
+        userId: `teacher:${teacher.teacherId}`,
+        role: "teacher" as const,
+        account: teacher.account,
+        name: teacher.name,
+        teacherId: teacher.teacherId,
+        passwordHash: teacher.passwordHash,
+        status: teacher.status === "frozen" ? "frozen" : "active"
+      };
+    }
+
+    const studentRows = await db
+      .select({
+        id: students.id,
+        studentNo: students.studentNo,
+        name: students.name,
+        passwordHash: students.passwordHash
+      })
+      .from(students)
+      .where(eq(students.studentNo, normalizedAccount))
+      .limit(1);
+    const student = studentRows[0];
+
+    if (!student) {
+      return null;
+    }
+
+    return {
+      userId: `student:${student.id}`,
+      role: "student" as const,
+      account: student.studentNo,
+      name: student.name,
+      studentId: student.id,
+      studentNo: student.studentNo,
+      passwordHash: student.passwordHash,
+      status: "active" as const
+    };
+  }
+};
+
+const sessionRefreshTokenRepo = {
+  async save(record: SessionRefreshTokenRecord) {
+    sessionRefreshTokenStore.set(record.tokenHash, record);
+  },
+  async findByTokenHash(tokenHash: string) {
+    return sessionRefreshTokenStore.get(tokenHash) ?? null;
+  },
+  async revokeByTokenHash(tokenHash: string, revokedAt: Date) {
+    const existing = sessionRefreshTokenStore.get(tokenHash);
+    if (!existing) {
+      return;
+    }
+
+    sessionRefreshTokenStore.set(tokenHash, {
+      ...existing,
+      revokedAt
+    });
+  }
+};
+
+const sessionAuthService = createSessionAuthService({
+  accountRepo: sessionAccountRepo,
+  refreshTokenRepo: sessionRefreshTokenRepo,
+  passwordVerifier: bcryptPasswordVerifier,
+  tokenManager: createJwtSessionTokenManager({
+    secret: env.JWT_SECRET
+  })
 });
 
 const requireStudentAuth = createStudentAuthMiddleware({
@@ -1415,6 +1524,7 @@ app.route(
   "/auth",
   createAuthRoutes({
     studentAuthService,
+    sessionAuthService,
     studentFirstLoginVerificationService,
     enrollmentProfileService,
     requireStudentAuth
