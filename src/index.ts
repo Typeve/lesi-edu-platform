@@ -53,7 +53,7 @@ import { createResourceAuthorizationService, type ResourceType } from "./modules
 import { hasPermissionByRole } from "./modules/authorization/rbac.js";
 import { bcryptPasswordHasher, bcryptPasswordVerifier } from "./modules/auth/password.js";
 import { createRefreshTokenSigner, createRefreshTokenVerifier } from "./modules/auth/refresh-token.js";
-import { createSessionAuthService } from "./modules/auth/session-service.js";
+import { createSessionAuthService, type RefreshTokenRecord } from "./modules/auth/session-service.js";
 import { createStudentAuthService } from "./modules/auth/service.js";
 import { createJwtAuthTokenSigner, createJwtAuthTokenVerifier } from "./modules/auth/session-token.js";
 import { createJwtTokenSigner, createJwtTokenVerifier } from "./modules/auth/token.js";
@@ -416,7 +416,7 @@ const sessionAuthService = createSessionAuthService({
   refreshTokenSigner,
   refreshTokenVerifier,
   refreshTokenRepo: {
-    async save(record) {
+    async save(record: RefreshTokenRecord) {
       refreshTokenStore.set(record.tokenHash, {
         auth: record.auth,
         expiresAt: record.expiresAt,

@@ -63,9 +63,23 @@ export interface AuthRouteDependencies {
 }
 
 const REFRESH_COOKIE_NAME = "refresh_token";
+const BEARER_TOKEN_PATTERN = /^bearer\s+(\S+)\s*$/i;
 
 const passThroughAuthMiddleware: MiddlewareHandler = async (_, next) => {
   await next();
+};
+
+const parseBearerToken = (authorizationHeader: string | undefined): string | null => {
+  if (!authorizationHeader) {
+    return null;
+  }
+
+  const matched = authorizationHeader.trim().match(BEARER_TOKEN_PATTERN);
+  if (!matched) {
+    return null;
+  }
+
+  return matched[1];
 };
 
 const isValidLoginBody = (body: unknown): body is StudentLoginRequestBody => {
@@ -191,6 +205,9 @@ const defaultSessionAuthService: SessionAuthService = {
   },
   async me() {
     throw new Error("sessionAuthService is not configured");
+  },
+  async getSessionUser() {
+    throw new Error("sessionAuthService is not configured");
   }
 };
 
@@ -229,11 +246,7 @@ export const createAuthRoutes = ({
         {
           accessToken: result.accessToken,
           expiresIn: result.expiresIn,
-          user: {
-            userId: result.user.userId,
-            role: result.user.role,
-            displayName: result.user.displayName
-          }
+          user: result.user
         },
         200
       );
@@ -268,11 +281,7 @@ export const createAuthRoutes = ({
         {
           accessToken: result.accessToken,
           expiresIn: result.expiresIn,
-          user: {
-            userId: result.user.userId,
-            role: result.user.role,
-            displayName: result.user.displayName
-          }
+          user: result.user
         },
         200
       );
@@ -294,34 +303,70 @@ export const createAuthRoutes = ({
       path: "/"
     });
 
-    return c.json({ message: "logout success" }, 200);
+    return c.json({ message: "logged out" }, 200);
   });
 
   auth.get("/me", requireAuth, async (c) => {
     const authInfo = c.get("auth");
-    if (!authInfo) {
+    if (authInfo) {
+      return c.json(
+        {
+          userId: authInfo.sub,
+          role: authInfo.role,
+          account: authInfo.account,
+          displayName: authInfo.displayName ?? authInfo.account,
+          studentId: authInfo.studentId,
+          studentNo: authInfo.studentNo,
+          teacherId: authInfo.teacherId,
+          mustChangePassword: authInfo.mustChangePassword ?? false,
+          scope: {
+            schoolId: authInfo.schoolId,
+            collegeId: authInfo.collegeId,
+            majorId: authInfo.majorId,
+            classId: authInfo.classId
+          }
+        },
+        200
+      );
+    }
+
+    const accessToken = parseBearerToken(c.req.header("authorization"));
+    if (!accessToken) {
       return c.json({ message: "unauthorized" }, 401);
     }
 
-    return c.json(
-      {
-        userId: authInfo.sub,
-        role: authInfo.role,
-        account: authInfo.account,
-        displayName: authInfo.displayName ?? authInfo.account,
-        studentId: authInfo.studentId,
-        studentNo: authInfo.studentNo,
-        teacherId: authInfo.teacherId,
-        mustChangePassword: authInfo.mustChangePassword ?? false,
-        scope: {
-          schoolId: authInfo.schoolId,
-          collegeId: authInfo.collegeId,
-          majorId: authInfo.majorId,
-          classId: authInfo.classId
+    if (typeof sessionAuthService.getSessionUser === "function") {
+      try {
+        const currentUser = await sessionAuthService.getSessionUser({ accessToken });
+        return c.json(currentUser, 200);
+      } catch (error) {
+        if (error instanceof SessionUnauthorizedError) {
+          return c.json({ message: "unauthorized" }, 401);
         }
-      },
-      200
-    );
+        throw error;
+      }
+    }
+
+    try {
+      const currentAuth = await sessionAuthService.me(accessToken);
+      return c.json(
+        {
+          userId: currentAuth.sub,
+          role: currentAuth.role,
+          account: currentAuth.account,
+          displayName: currentAuth.displayName ?? currentAuth.account,
+          studentId: currentAuth.studentId,
+          studentNo: currentAuth.studentNo,
+          teacherId: currentAuth.teacherId
+        },
+        200
+      );
+    } catch (error) {
+      if (error instanceof SessionUnauthorizedError) {
+        return c.json({ message: "unauthorized" }, 401);
+      }
+      throw error;
+    }
   });
 
   auth.post("/change-password", requireAuth, async (c) => {
