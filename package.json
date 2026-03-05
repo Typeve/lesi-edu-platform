@@ -10,6 +10,7 @@
     "check": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:seed": "tsx src/scripts/db-seed.ts",
     "db:studio": "drizzle-kit studio",
     "test": "node --import tsx --test \"tests/**/*.test.ts\""
   },
