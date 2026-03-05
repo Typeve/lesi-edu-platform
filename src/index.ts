@@ -31,6 +31,7 @@ import {
   createRequirePermissionFactory
 } from "./middleware/auth-session.js";
 import { createStudentAuthMiddleware } from "./middleware/auth.js";
+import { createLocalhostCorsMiddleware } from "./middleware/cors.js";
 import { createResourceAuthorizationMiddleware } from "./middleware/resource-authorization.js";
 import { createActivityService } from "./modules/activity/service.js";
 import { createAuditLogService } from "./modules/audit/service.js";
@@ -1760,6 +1761,7 @@ const createResourceAuthorization = (resourceType: ResourceType) => {
 };
 
 const app = new Hono();
+app.use("*", createLocalhostCorsMiddleware());
 
 app.get("/", (c) =>
   c.json({
